@@ -109,9 +109,11 @@ double FVP (TRPOparam param, double *Result, double *Input)
     //          Std is the same for all samples in each simulation iteration,
     //          so we just allocate Std memory space for one sample and use it for all samples.
     //          The general case should be another vector of Std with size NumSamples*ActionSpaceDim
-    double * Observ = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
-    double * Mean   = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
-    double * Std    = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Observ    = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
+    double * Mean      = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Std       = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Action    = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Advantage = (double *) calloc(NumSamples, sizeof(double));
 
     // Allocate Memory for Average Sample Mean and Average Sample Mean Square
     // Remarks: These values are statistics calculated from the samples, to be used in the algorithm
@@ -260,6 +262,12 @@ double FVP (TRPOparam param, double *Result, double *Input)
         for (size_t j=0; j<ObservSpaceDim; ++j) {
             fscanf(DataFilePointer, "%lf", &Observ[i*ObservSpaceDim+j]);
         }
+        // Read Action
+        for (size_t j=0; j<ActionSpaceDim; ++j) {
+            fscanf(DataFilePointer, "%lf", &Action[i*ActionSpaceDim+j]);
+        }        
+        // Read Advantage
+        fscanf(DataFilePointer, "%lf", &Advantage[i]);        
     }
     
     // Close Data File
@@ -552,7 +560,7 @@ double FVP (TRPOparam param, double *Result, double *Input)
     }
     free(LogStd); free(VLogStd); free(RGLogStd);
     free(GStd); free(RStd);
-    free(Observ); free(Mean); free(Std);
+    free(Observ); free(Mean); free(Std); free(Action); free(Advantage);
     free(AvgSampleMean); free(AvgSampleMeanSq);
 
     return runtimeComp;
@@ -638,9 +646,11 @@ double FVPFast (TRPOparam param, double *Result, double *Input, size_t NumThread
     //          Std is the same for all samples in each simulation iteration,
     //          so we just allocate Std memory space for one sample and use it for all samples.
     //          The general case should be another vector of Std with size NumSamples*ActionSpaceDim
-    double * Observ = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
-    double * Mean   = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
-    double * Std    = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Observ    = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
+    double * Mean      = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Std       = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Action    = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Advantage = (double *) calloc(NumSamples, sizeof(double));
     
     
     //////////////////// Memory Allocation - Ordinary Forward Propagation ////////////////////
@@ -763,6 +773,12 @@ double FVPFast (TRPOparam param, double *Result, double *Input, size_t NumThread
         for (size_t j=0; j<ObservSpaceDim; ++j) {
             fscanf(DataFilePointer, "%lf", &Observ[i*ObservSpaceDim+j]);
         }
+        // Read Action
+        for (size_t j=0; j<ActionSpaceDim; ++j) {
+            fscanf(DataFilePointer, "%lf", &Action[i*ActionSpaceDim+j]);
+        }        
+        // Read Advantage
+        fscanf(DataFilePointer, "%lf", &Advantage[i]);        
     }
     
     // Close Data File
@@ -950,7 +966,7 @@ double FVPFast (TRPOparam param, double *Result, double *Input, size_t NumThread
         free(W[i]); free(VW[i]); free(RGW[i]);
         free(B[i]); free(VB[i]); free(RGB[i]);
     }
-    free(Observ); free(Mean); free(Std); free(VLogStd);
+    free(Observ); free(Mean); free(Std); free(Action); free(Advantage); free(VLogStd);
 
     return runtimeS;
 }
@@ -1142,10 +1158,11 @@ double FVP_FPGA (TRPOparam param, double *Result, double *Input)
     //          Std is the same for all samples in each simulation iteration,
     //          so we just allocate Std memory space for one sample and use it for all samples.
     //          The general case should be another vector of Std with size NumSamples*ActionSpaceDim
-    double * Observ = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
-    double * Mean   = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
-    double * Std    = (double *) calloc(ActionSpaceDim, sizeof(double));
-    
+    double * Observ    = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
+    double * Mean      = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Std       = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Action    = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Advantage = (double *) calloc(NumSamples, sizeof(double));
     
     //////////////////// Load Neural Network ////////////////////
     
@@ -1230,6 +1247,12 @@ double FVP_FPGA (TRPOparam param, double *Result, double *Input)
         for (size_t j=0; j<ObservSpaceDim; ++j) {
             fscanf(DataFilePointer, "%lf", &Observ[i*ObservSpaceDim+j]);
         }
+        // Read Action
+        for (size_t j=0; j<ActionSpaceDim; ++j) {
+            fscanf(DataFilePointer, "%lf", &Action[i*ActionSpaceDim+j]);
+        }        
+        // Read Advantage
+        fscanf(DataFilePointer, "%lf", &Advantage[i]);      
     }
     
     // Close Data File
@@ -1462,7 +1485,7 @@ double FVP_FPGA (TRPOparam param, double *Result, double *Input)
         free(W[i]); free(VW[i]);
         free(B[i]); free(VB[i]);
     }
-    free(Observ); free(Mean); free(Std); free(VLogStd);
+    free(Observ); free(Mean); free(Std); free(Action); free(Advantage); free(VLogStd);
 
     // Free Memories Allocated for DFE
     free(Observation); free(BiasStd); free(FVPResult);
@@ -1591,9 +1614,11 @@ double CG_FPGA (TRPOparam param, double *Result, double *b, size_t MaxIter, doub
     //          Std is the same for all samples in each simulation iteration,
     //          so we just allocate Std memory space for one sample and use it for all samples.
     //          The general case should be another vector of Std with size NumSamples*ActionSpaceDim
-    double * Observ = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
-    double * Mean   = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
-    double * Std    = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Observ    = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
+    double * Mean      = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Std       = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * Action    = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Advantage = (double *) calloc(NumSamples, sizeof(double));
     
     
     //////////////////// Load Neural Network ////////////////////
@@ -1688,6 +1713,12 @@ double CG_FPGA (TRPOparam param, double *Result, double *b, size_t MaxIter, doub
         for (size_t j=0; j<ObservSpaceDim; ++j) {
             fscanf(DataFilePointer, "%lf", &Observ[i*ObservSpaceDim+j]);
         }
+        // Read Action
+        for (size_t j=0; j<ActionSpaceDim; ++j) {
+            fscanf(DataFilePointer, "%lf", &Action[i*ActionSpaceDim+j]);
+        }        
+        // Read Advantage
+        fscanf(DataFilePointer, "%lf", &Advantage[i]);           
     }
     
     // Close Data File
@@ -2080,7 +2111,7 @@ double CG_FPGA (TRPOparam param, double *Result, double *b, size_t MaxIter, doub
         free(W[i]); free(VW[i]);
         free(B[i]); free(VB[i]);
     }
-    free(Observ); free(Mean); free(Std); free(VLogStd);
+    free(Observ); free(Mean); free(Std); free(Action); free(Advantage); free(VLogStd);
 
     // Free Memories Allocated for DFE
     free(Observation); free(BiasStd); free(FVPResult);
@@ -2092,16 +2123,16 @@ double CG_FPGA (TRPOparam param, double *Result, double *b, size_t MaxIter, doub
 }
 
 
-void SwimmerTest(size_t NumThreads)
+void Test_FVP(size_t NumThreads)
 {
 	
-    // Swimmer-v1
+    // ArmDOF_0-v0
     char AcFunc [] = {'l', 't', 't', 'l'};
-    size_t LayerSize [] = {8, 64, 64, 2};
+    size_t LayerSize [] = {15, 16, 16, 3};
 
-    char * ModelFileName = "SwimmerTestModel.txt";
-    char * DataFileName  = "SwimmerTestData.txt";
-    char * FVPFileName   = "SwimmerTestFVP.txt";
+    char * ModelFileName = "ArmTestModel.txt";
+    char * DataFileName  = "ArmTestData.txt";
+    char * FVPFileName   = "ArmTestFVP.txt";
 
     TRPOparam Param;
     Param.ModelFile  = ModelFileName;
@@ -2109,7 +2140,7 @@ void SwimmerTest(size_t NumThreads)
     Param.NumLayers  = 4;
     Param.AcFunc     = AcFunc;
     Param.LayerSize  = LayerSize;
-    Param.NumSamples = 26000;
+    Param.NumSamples = 2400;
     Param.CG_Damping = 0.1;
 
     // Open Simulation Data File that contains test data
@@ -2153,16 +2184,16 @@ void SwimmerTest(size_t NumThreads)
 }
 
 
-void SwimmerCGTest(size_t NumThreads)
+void Test_CG(size_t NumThreads)
 {
 	
-    // Swimmer-v1
+    // ArmDOF_0-v0
     char AcFunc [] = {'l', 't', 't', 'l'};
-    size_t LayerSize [] = {8, 64, 64, 2};
+    size_t LayerSize [] = {15, 16, 16, 3};
 
-    char * ModelFileName = "SwimmerTestModel.txt";
-    char * DataFileName  = "SwimmerTestData.txt";
-    char * CGFileName    = "SwimmerTestCG.txt";
+    char * ModelFileName = "ArmTestModel.txt";
+    char * DataFileName  = "ArmTestData.txt";
+    char * CGFileName    = "ArmTestCG.txt";
 
     TRPOparam Param;
     Param.ModelFile  = ModelFileName;
@@ -2170,7 +2201,7 @@ void SwimmerCGTest(size_t NumThreads)
     Param.NumLayers  = 4;
     Param.AcFunc     = AcFunc;
     Param.LayerSize  = LayerSize;
-    Param.NumSamples = 26000;
+    Param.NumSamples = 2400;
     Param.CG_Damping = 0.1;
 
     // Open Simulation Data File that contains test data
@@ -2217,38 +2248,16 @@ void SwimmerCGTest(size_t NumThreads)
 
 void Test_FVP_FPGA() {
 
-/*
-    // Swimmer-v1
+
+    // ArmDOF_0-v0
     char            AcFunc [] = {'l', 't', 't', 'l'};
-    size_t       LayerSize [] = {  8, 64, 64, 2};
-    size_t PaddedLayerSize [] = { 32, 64, 64, 8};
-    size_t       NumBlocks [] = {  4,  4,  4, 4};
+    size_t       LayerSize [] = { 15, 16, 16, 3};
+    size_t PaddedLayerSize [] = { 16, 16, 16, 4};
+    size_t       NumBlocks [] = {  4,  4,  4, 2};
 
-    char * ModelFileName = "SwimmerTestModel.txt";
-    char * DataFileName  = "SwimmerTestData.txt";
-    char * FVPFileName   = "SwimmerTestFVP.txt";
-*/
-/*
-    // Ant-v1
-    char            AcFunc [] = {'l', 't', 't', 'l'};
-    size_t       LayerSize [] = {111, 64, 32, 8};
-    size_t PaddedLayerSize [] = {120, 64, 35, 8};
-    size_t       NumBlocks [] = { 24,  8,  7, 8};
-
-    char * ModelFileName = "AntTestModel.txt";
-    char * DataFileName  = "AntTestData.txt";
-    char * FVPFileName    = "AntTestFVP.txt";
-*/
-
-    // Humanoid-v1
-    char            AcFunc [] = {'l', 't', 't', 'l'};
-    size_t       LayerSize [] = {376,128, 64,17};
-    size_t PaddedLayerSize [] = {384,128, 66,18};
-    size_t       NumBlocks [] = { 32,  8,  6, 6};
-
-    char * ModelFileName = "HumanoidTestModel.txt";
-    char * DataFileName  = "HumanoidTestData.txt";
-    char * FVPFileName   = "HumanoidTestFVP.txt";
+    char * ModelFileName = "ArmTestModel.txt";
+    char * DataFileName  = "ArmTestData.txt";
+    char * FVPFileName   = "ArmTestFVP.txt";
 
     TRPOparam Param;
     Param.ModelFile         = ModelFileName;
@@ -2258,7 +2267,7 @@ void Test_FVP_FPGA() {
     Param.LayerSize         = LayerSize;
     Param.PaddedLayerSize   = PaddedLayerSize;
     Param.NumBlocks         = NumBlocks;
-    Param.NumSamples        = 100;
+    Param.NumSamples        = 2400;
     Param.CG_Damping        = 0.1;
 
     // Open Simulation Data File that contains test data
@@ -2327,38 +2336,17 @@ void Test_FVP_FPGA() {
 void Test_CG_FPGA(size_t NumThreads)
 {
 
-/*
-    // Swimmer-v1
+
+    // ArmDOF_0-v0
     char            AcFunc [] = {'l', 't', 't', 'l'};
-    size_t       LayerSize [] = {  8, 64, 64, 2};
-    size_t PaddedLayerSize [] = { 32, 64, 64, 8};
-    size_t       NumBlocks [] = {  4,  4,  4, 4};
+    size_t       LayerSize [] = { 15, 16, 16, 3};
+    size_t PaddedLayerSize [] = { 16, 16, 16, 4};
+    size_t       NumBlocks [] = {  4,  4,  4, 2};
 
-    char * ModelFileName = "SwimmerTestModel.txt";
-    char * DataFileName  = "SwimmerTestData.txt";
-    char * CGFileName    = "SwimmerTestCG.txt";
-*/
-/*
-    // Ant-v1
-    char            AcFunc [] = {'l', 't', 't', 'l'};
-    size_t       LayerSize [] = {111, 64, 32, 8};
-    size_t PaddedLayerSize [] = {120, 64, 35, 8};
-    size_t       NumBlocks [] = { 24,  8,  7, 8};
+    char * ModelFileName = "ArmTestModel.txt";
+    char * DataFileName  = "ArmTestData.txt";
+    char * CGFileName    = "ArmTestCG.txt";
 
-    char * ModelFileName = "AntTestModel.txt";
-    char * DataFileName  = "AntTestData.txt";
-    char * CGFileName    = "AntTestCG.txt";
-*/
-
-    // Humanoid-v1
-    char            AcFunc [] = {'l', 't', 't', 'l'};
-    size_t       LayerSize [] = {376,128, 64,17};
-    size_t PaddedLayerSize [] = {384,128, 66,18};
-    size_t       NumBlocks [] = { 32,  8,  6, 6};
-
-    char * ModelFileName = "HumanoidTestModel.txt";
-    char * DataFileName  = "HumanoidTestData.txt";
-    char * CGFileName    = "HumanoidTestCG.txt";
 
     TRPOparam Param;
     Param.ModelFile         = ModelFileName;
@@ -2368,7 +2356,7 @@ void Test_CG_FPGA(size_t NumThreads)
     Param.LayerSize         = LayerSize;
     Param.PaddedLayerSize   = PaddedLayerSize;
     Param.NumBlocks         = NumBlocks;
-    Param.NumSamples        = 50000;
+    Param.NumSamples        = 2400;
     Param.CG_Damping        = 0.1;
 
     // Open Simulation Data File that contains test data
@@ -2439,15 +2427,14 @@ int main()
 
     //////////////////// Fisher Vector Product Computation ////////////////////
     
-//    SimpleTest();
-//    PendulumTest(6);
-//    SwimmerTest(6);
-//    SwimmerCGTest(6);
+
+    Test_FVP(6);
+//    Test_CG(6);
 
 
     //////////////////// FPGA ////////////////////
 
-    Test_FVP_FPGA();
+//    Test_FVP_FPGA();
 //    Test_CG_FPGA(6);
 
     return 0;

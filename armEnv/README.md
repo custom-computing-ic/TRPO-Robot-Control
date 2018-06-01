@@ -32,7 +32,7 @@ Start training:
 ```bash
 python run_pg.py --gamma=0.995 --lam=0.98 --agent=modular_rl.agentzoo.TrpoAgent
 --max_kl=0.01 --cg_damping=0.1 --activation=tanh --n_iter=500 --seed=0 --hid_sizes=16,16
---timesteps_per_batch=3000 --env=ArmDOF_0-v0 --outfile=./result
+--timesteps_per_batch=2300 --env=ArmDOF_0-v0 --outfile=./result
 ```
 The training videos will be saved in `result.dir` directory
 
