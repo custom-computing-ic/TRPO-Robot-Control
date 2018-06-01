@@ -1,0 +1,263 @@
+import org.junit.Test;
+import java.util.List;
+import java.util.ArrayList;
+import java.lang.Math;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.managers.standard.SimulationManager;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelConfiguration;
+import com.maxeler.maxcompiler.v2.utils.Bits;
+
+public class EvenLayerTest {
+
+    private final char      AcFunc = 't';
+    private final int   InBlockDim = 6;
+    private final int  NumInBlocks = 4;
+    private final int  OutBlockDim = 8;
+    private final int NumOutBlocks = 4;
+    private final int InputLatency = 10;
+
+    private final int WeightInitCycles = 2 * InBlockDim * OutBlockDim * NumOutBlocks;
+    private final int BiasInitCycles   = 2 * OutBlockDim * NumOutBlocks;
+    private final int FwdPropCycles    = InputLatency*InBlockDim;
+
+    private class EvenLayerTestKernel extends Kernel {
+
+        EvenLayerTestKernel(KernelParameters parameters)
+        {
+
+        super(parameters);
+
+        ///////////////////////// Control /////////////////////////
+
+        // Remarks - AddrGenerator cannot be reset at Tick 0, so postpone 1 cycle
+        DFEVar Tick = control.count.simpleCounter(32);
+        
+        // Initialisation
+        DFEVar beginInit = (Tick === 1);
+        
+        // Initialise Weight
+        AddrGenerator WeightInitCounter = new AddrGenerator(this, 1, WeightInitCycles, beginInit);
+        DFEVar isWeightInit = WeightInitCounter.isValid();          
+        
+        // Initialise Bias
+        AddrGenerator BiasInitCounter = new AddrGenerator(this, 1, BiasInitCycles, beginInit);
+        DFEVar isBiasInit = BiasInitCounter.isValid();        
+        
+        // Forward Propagation
+        DFEVar beginFwdProp = (Tick === WeightInitCycles + 10);
+        AddrGenerator ComputingCounter = new AddrGenerator(this, 1, FwdPropCycles, beginFwdProp);
+        DFEVar isCalculating = ComputingCounter.isValid();
+    
+        // beginNewRow
+        Count.Params NewRowCounterParam = control.count.makeParams(16)
+                                                   .withInitValue(0)
+                                                   .withMax(InputLatency)
+                                                   .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                   .withReset(beginFwdProp);
+        Counter NewRowCounter = control.count.makeCounter(NewRowCounterParam);
+        DFEVar beginNewRow = (NewRowCounter.getCount() === 0) & isCalculating;
+        
+
+        /////////////////////// Input ///////////////////////        
+        
+        // Input to Layer Block - fixed point prevLayer and prevRyLayer
+        DFEVectorType<DFEVar>  yVecType = new DFEVectorType<DFEVar>(Def.DataType, NumInBlocks);
+        DFEVectorType<DFEVar> RyVecType = new DFEVectorType<DFEVar>(Def.DataType, NumInBlocks);
+        DFEVector<DFEVar>   PrevLayer = io.input("PrevLayer",    yVecType, isWeightInit | beginNewRow);
+        DFEVector<DFEVar> PrevRyLayer = io.input("PrevRyLayer", RyVecType, beginNewRow);
+        DFEVar           BiasInitData = io.input("BiasInitData", Def.DataType, isBiasInit);
+        
+        // Inputs for Back Propagation - provide dummy inputs
+        DFEVector<DFEVar> BwdPrevLayer   = constant.vect(NumInBlocks,  Def.DataType, 0);
+        DFEVector<DFEVar> BwdNextLayer   = constant.vect(NumOutBlocks, Def.DataType, 0);
+        DFEVector<DFEVar> BwdNextRGLayer = constant.vect(NumOutBlocks, Def.RGType,   0);
+        DFEVar beginBwdProp  = constant.var(dfeUInt(1), 0);
+        DFEVar beginReadBack = constant.var(dfeUInt(1), 0);
+         
+        // Layer Block
+        @SuppressWarnings("unused")
+        EvenLayer TestMidLayer = new EvenLayer(this, 1, AcFunc, InBlockDim, NumInBlocks, OutBlockDim, NumOutBlocks, InputLatency,
+                                             PrevLayer, BwdPrevLayer, PrevRyLayer, BwdNextLayer, BwdNextRGLayer, BiasInitData, 
+                                             beginInit, beginInit, beginFwdProp, beginBwdProp, beginReadBack);
+
+        }
+    }
+
+    @Test 
+    public void testRandomInputData() {
+    
+        // Settings
+        final int numTicks = WeightInitCycles + FwdPropCycles + 20;
+        final int  InLayerSize =  InBlockDim * NumInBlocks;
+        final int OutLayerSize = OutBlockDim * NumOutBlocks;
+        final int   NumWeights = InLayerSize * OutLayerSize;
+        
+        // Kernel
+        SimulationManager mgr = new SimulationManager("EvenLayerTest");
+        mgr.getCurrentKernelConfig().simulation.setRAMAddressCollisionBehaviour(KernelConfiguration.SimulationOptions.SimulationBehaviour.IGNORE);
+        EvenLayerTestKernel kernel = new EvenLayerTestKernel(mgr.makeKernelParameters());
+        mgr.setKernel(kernel);
+
+
+        ///////////////////////// Weight, VWeight, PrevLayer /////////////////////////
+        
+        // Generate Regular Weight and VWeight
+        double []  W = new double[NumWeights];
+        double [] VW = new double[NumWeights];
+        for (int X=0; X<NumInBlocks; ++X) {
+            for (int Y=0; Y<NumOutBlocks; ++Y) {
+                int addr = 0;
+                for (int addrX=0; addrX<InBlockDim; ++addrX) {
+                    for (int addrY=0; addrY<OutBlockDim; ++addrY) {               
+                        double curWeight = X + 0.01 * (addrX*OutBlockDim + addrY);
+                         W[(X*InBlockDim+addrX)*OutLayerSize + Y*OutBlockDim + addrY] = curWeight;
+                        VW[(X*InBlockDim+addrX)*OutLayerSize + Y*OutBlockDim + addrY] = curWeight;
+                        addr++;
+                    }
+                }
+            }
+        }
+        
+        // Generate Regular PrevLayer
+        // Note: There is no need to repeat, which is different from input layer
+        double [][] y = new double[InBlockDim][NumInBlocks];
+        for (int i=0; i<InBlockDim; ++i) {
+            for (int j=0; j<NumInBlocks; ++j) {
+                y[i][j] = 0.1 * j + 0.01 * i;
+            }
+        }
+        
+        // Feed Regular Weight, VWeight and PrevLayer into PrevLayerData
+        double [][] PrevLayerData = new double[WeightInitCycles+InBlockDim][NumInBlocks];
+        // Feed Weight
+        for (int Y=0; Y<NumOutBlocks; ++Y) {
+            for (int addrX=0; addrX<InBlockDim; ++addrX) {
+                for (int addrY=0; addrY<OutBlockDim; ++addrY) {
+                    int iter = Y*InBlockDim*OutBlockDim + addrX*OutBlockDim + addrY;   
+                    for (int X=0; X<NumInBlocks; ++X) {
+                        double curW = W[(X*InBlockDim+addrX)*OutLayerSize + Y*OutBlockDim + addrY];
+                        PrevLayerData[iter][X] = curW;
+                    }
+                }
+            }
+        }
+        // Feed VWeight into PrevLayerData
+        for (int Y=0; Y<NumOutBlocks; ++Y) {
+            for (int addrX=0; addrX<InBlockDim; ++addrX) {
+                for (int addrY=0; addrY<OutBlockDim; ++addrY) {
+                    int iter = InBlockDim*OutBlockDim*NumOutBlocks + Y*InBlockDim*OutBlockDim + addrX*OutBlockDim + addrY;   
+                    for (int X=0; X<NumInBlocks; ++X) {
+                        double curVW = VW[(X*InBlockDim+addrX)*OutLayerSize + Y*OutBlockDim + addrY];
+                        PrevLayerData[iter][X] = curVW;
+                    }
+                }
+            }
+        }                
+        // Feed PrevLayer into PrevLayerData
+        for (int addrX=0; addrX<InBlockDim; ++addrX) {
+            int iter = WeightInitCycles + addrX;
+            for (int X=0; X<NumInBlocks; ++X) {
+                PrevLayerData[iter][X] = y[addrX][X];
+            }
+        }
+
+        // PrevLayerData into Kernel
+        List<Bits> PrevLayer = VectorDataGenerator(Def.DataType, PrevLayerData, WeightInitCycles+InBlockDim, NumInBlocks);   
+        mgr.setInputDataRaw("PrevLayer", PrevLayer);
+
+
+        ///////////////////////// PrevRyLayer /////////////////////////
+
+        // Feed Random PrevRyLayer
+        // Note: There is no need to repeat, which is different from input layer
+        double [][] PrevRyLayerData = new double[InBlockDim][NumInBlocks];
+        for (int i=0; i<InBlockDim; ++i) {
+            for (int j=0; j<NumInBlocks; ++j) {
+                PrevRyLayerData[i][j] = Math.random();
+            }
+        }
+        
+        List<Bits> PrevRyLayer = VectorDataGenerator(Def.RGType, PrevRyLayerData, InBlockDim, NumInBlocks);
+        mgr.setInputDataRaw("PrevRyLayer", PrevRyLayer);
+
+
+        ///////////////////////// Bias and VBias /////////////////////////
+        
+        // Generate Random Bias and VBias
+        double []  B = new double[OutLayerSize];
+        double [] VB = new double[OutLayerSize];
+        for (int Y=0; Y<NumOutBlocks; ++Y) {
+            for (int addrY=0; addrY<OutBlockDim; ++addrY) {
+                 B[Y*OutBlockDim + addrY] = addrY;
+                VB[Y*OutBlockDim + addrY] = addrY;
+            }
+        }
+
+        // Feed Random Bias and VBias into Kernel
+        double [] BiasInitData = new double[2*OutLayerSize];
+        for (int i=0; i<OutLayerSize; ++i) BiasInitData[i] = B[i];
+        for (int i=0; i<OutLayerSize; ++i) BiasInitData[OutLayerSize+i] = VB[i];
+        mgr.setInputData("BiasInitData", BiasInitData);
+
+
+        ///////////////////////// Expected Output /////////////////////////  
+
+        // Calculate Expected Output
+        double [] PreAc_y  = new double[NumOutBlocks];
+        double [] PreAc_Ry = new double[NumOutBlocks];        
+        double [] Expected_y  = new double[NumOutBlocks];
+        double [] Expected_Ry = new double[NumOutBlocks];
+        for (int addrY=0; addrY<OutBlockDim; ++addrY) {
+            for (int Y=0; Y<NumOutBlocks; ++Y) {
+                int ColNum = Y*OutBlockDim + addrY;
+                Expected_y[Y]  =  B[ColNum];
+                Expected_Ry[Y] = VB[ColNum];
+                for (int X=0; X<NumInBlocks; ++X) {
+                    for (int addrX=0; addrX<InBlockDim; ++addrX) {
+                        int RowNum = X*InBlockDim + addrX;
+                        Expected_y[Y]  +=  W[RowNum*OutLayerSize + ColNum] * PrevLayerData[WeightInitCycles+addrX][X];
+                        Expected_Ry[Y] +=  W[RowNum*OutLayerSize + ColNum] * PrevRyLayerData[addrX][X];
+                        Expected_Ry[Y] += VW[RowNum*OutLayerSize + ColNum] * PrevLayerData[WeightInitCycles+addrX][X];
+                    }
+                }
+                PreAc_y[Y]  = Expected_y[Y];
+                PreAc_Ry[Y] = Expected_Ry[Y];
+                Expected_y[Y]  = Math.tanh(Expected_y[Y]);
+                Expected_Ry[Y] = Expected_Ry[Y] * (1 - Expected_y[Y] * Expected_y[Y]);
+            }
+            System.out.println("PreAc_y[1:4]["+addrY+"]=(" +PreAc_y[0] +","+PreAc_y[1] +","+PreAc_y[2] +","+PreAc_y[3] +") => "
+                             +"y[1:4]["+addrY+"]=("+Expected_y[0]+","+Expected_y[1]+","+Expected_y[2]+","+Expected_y[3]+")");              
+            System.out.println("PreAc_Ry[1:4]["+addrY+"]=(" +PreAc_Ry[0] +","+PreAc_Ry[1] +","+PreAc_Ry[2] +","+PreAc_Ry[3] +") => "
+                             +"y[1:4]["+addrY+"]=("+Expected_Ry[0]+","+Expected_Ry[1]+","+Expected_Ry[2]+","+Expected_Ry[3]+")");              
+        }
+
+
+        ///////////////////////// Run Test /////////////////////////
+
+        // Run Test
+        mgr.setKernelCycles(numTicks);
+        mgr.runTest();
+    }
+    
+    // Input Data Generator
+    public static List<Bits> VectorDataGenerator(DFEType Type, double [][] data, int VectorDepth, int VectorWidth) {
+        final List<Bits> encodedData = new ArrayList<Bits>(VectorDepth);
+        for (int i=0; i<VectorDepth; ++i) {
+            Bits thisStepBits = Type.encodeConstant(data[i][0]);
+            for (int j=1; j<VectorWidth; ++j){
+                thisStepBits = Type.encodeConstant(data[i][j]).cat(thisStepBits);
+            }
+            encodedData.add(thisStepBits);
+        }
+        return encodedData;
+    }
+}

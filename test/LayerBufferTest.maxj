@@ -1,0 +1,204 @@
+import org.junit.Test;
+import java.util.List;
+import java.util.ArrayList;
+
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.managers.standard.SimulationManager;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelConfiguration;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
+import com.maxeler.maxcompiler.v2.utils.Bits;
+
+public class LayerBufferTest {
+
+    private class LayerBufferTestKernel extends Kernel {
+
+        LayerBufferTestKernel ( KernelParameters parameters, 
+                                int InBlockDim, 
+                                int NumInBlocks, 
+                                int OutBlockDim, 
+                                int NumOutBlocks, 
+                                int NumVectors, 
+                                int CyclesPerInput,
+                                int BeginReadTick)
+        {
+
+        super(parameters);
+        
+        //  Input Vector =  InBlockDim * NumInBlocks
+        // Output Vector = OutBlockDim * NumOutBlocks
+        final int BufferDepth = 4;
+
+        // Controlled Input Counters
+        // Remarks - AddrGenerator cannot be reset at Tick 0, so postpone 1 cycle
+        // Here we feed a new input vector every CyclesPerInput cycles
+        int NumCyclesToFeedInput = CyclesPerInput * InBlockDim * NumVectors + 1;
+        DFEVar Tick = control.count.simpleCounter(32);
+        DFEVar EnInput = (control.count.simpleCounter(8, CyclesPerInput) === 1) & (Tick<NumCyclesToFeedInput);
+        
+        // Input to LayerBuffer
+        DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.DataType, NumInBlocks);
+        DFEVector<DFEVar>  YIn = io.input("Y", InVecType, EnInput);    
+        DFEVector<DFEVar> RyIn = YIn;
+        
+        // Write Address Counters
+        // WrXAddr - column address
+        Count.Params WrXAddrCounterParam = control.count.makeParams(MathUtils.bitsToAddress(InBlockDim))
+                                                  .withInitValue(0)
+                                                  .withMax(InBlockDim)
+                                                  .withEnable(EnInput)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP);
+        Counter WrXAddrCounter = control.count.makeCounter(WrXAddrCounterParam);
+        DFEVar WrXAddr = WrXAddrCounter.getCount();
+
+        // WrYAddr - row address
+        Count.Params WrYAddrCounterParam = control.count.makeParams(MathUtils.bitsToAddress(BufferDepth))
+                                                  .withInitValue(0)
+                                                  .withMax(BufferDepth)
+                                                  .withEnable(WrXAddrCounter.getWrap())
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP);
+        Counter WrYAddrCounter = control.count.makeCounter(WrYAddrCounterParam);
+        DFEVar WrYAddr = WrYAddrCounter.getCount();
+
+        // Read Address
+        DFEVar beginRdFwdData = (Tick === BeginReadTick);
+        // RdXAddr - column address
+        Count.Params RdXAddrCounterParam = control.count.makeParams(MathUtils.bitsToAddress(OutBlockDim))
+                                                  .withInitValue(0)
+                                                  .withMax(OutBlockDim)
+                                                  .withEnable(Tick>=BeginReadTick)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginRdFwdData);
+        Counter RdXAddrCounter = control.count.makeCounter(RdXAddrCounterParam);
+        DFEVar RdXAddr = RdXAddrCounter.getCount();
+
+        // YAddr - row address
+        Count.Params RdYAddrCounterParam = control.count.makeParams(MathUtils.bitsToAddress(BufferDepth))
+                                                  .withInitValue(0)
+                                                  .withMax(BufferDepth)
+                                                  .withEnable(RdXAddrCounter.getWrap())
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginRdFwdData);
+        Counter RdYAddrCounter = control.count.makeCounter(RdYAddrCounterParam);
+        DFEVar RdYAddr = RdYAddrCounter.getCount();
+     
+        // LayerBuffer Block
+        DFEVar WriteAddrRow = WrYAddr;
+        DFEVar beginWrFwdData = EnInput & (WrXAddr === 0);
+        DFEVar isFwdDataInValid = EnInput;
+        DFEVar ReadAddrRow = RdYAddr;
+        DFEVar OffsetReadAddrCol = RdXAddr;
+        
+        // Supply Dummy Input for Backward Propagation Read Address
+        DFEVar BwdReadAddrRow = RdYAddr;
+        DFEVar BwdOffsetReadAddrCol = RdXAddr;
+        
+        @SuppressWarnings("unused")
+        LayerBuffer TestLayerBuffer = new LayerBuffer (this, 0, InBlockDim, NumInBlocks, OutBlockDim, NumOutBlocks,
+                                          BufferDepth, YIn, RyIn, WriteAddrRow, beginWrFwdData, isFwdDataInValid,
+                                          ReadAddrRow, OffsetReadAddrCol, BwdReadAddrRow, BwdOffsetReadAddrCol); 
+
+        }
+    }
+
+    @Test 
+    public void testEqualWidth() {
+
+        final int InBlockDim = 4;
+        final int NumInBlocks = 4;
+        final int OutBlockDim = 4;
+        final int NumOutBlocks = 4;
+        final int NumVectors = 6;
+        final int CyclesPerInput = 3;
+        final int BeginReadTick = 10;
+
+        test(InBlockDim, NumInBlocks, OutBlockDim, NumOutBlocks, NumVectors, CyclesPerInput, BeginReadTick);
+    }
+    
+    @Test
+    public void testDenseInput() {
+
+        final int InBlockDim = 4;
+        final int NumInBlocks = 6;
+        final int OutBlockDim = 8;
+        final int NumOutBlocks = 3;
+        final int NumVectors = 6;
+        final int CyclesPerInput = 3;
+        final int BeginReadTick = 10;    
+    
+        test(InBlockDim, NumInBlocks, OutBlockDim, NumOutBlocks, NumVectors, CyclesPerInput, BeginReadTick);
+    }
+
+    @Test
+    public void testDenseOutput() {
+
+        final int InBlockDim = 8;
+        final int NumInBlocks = 3;
+        final int OutBlockDim = 4;
+        final int NumOutBlocks = 6;
+        final int NumVectors = 6;
+        final int CyclesPerInput = 3;
+        final int BeginReadTick = 10;    
+    
+        test(InBlockDim, NumInBlocks, OutBlockDim, NumOutBlocks, NumVectors, CyclesPerInput, BeginReadTick);
+    }
+
+
+    // Test Runner
+    void test(int InBlockDim, int NumInBlocks, int OutBlockDim, int NumOutBlocks, int NumVectors, int CyclesPerInput, int BeginReadTick) {
+    
+        // Number of Ticks to run
+        final int numTicks = InBlockDim * CyclesPerInput * NumVectors + 100;
+    
+        // Kernel
+        SimulationManager mgr = new SimulationManager("LayerBufferTest");
+        mgr.getCurrentKernelConfig().simulation.setRAMAddressCollisionBehaviour(KernelConfiguration.SimulationOptions.SimulationBehaviour.IGNORE);
+        LayerBufferTestKernel kernel = new LayerBufferTestKernel(   mgr.makeKernelParameters(), 
+                                                                    InBlockDim, 
+                                                                    NumInBlocks, 
+                                                                    OutBlockDim, 
+                                                                    NumOutBlocks,
+                                                                    NumVectors,
+                                                                    CyclesPerInput,
+                                                                    BeginReadTick);
+        mgr.setKernel(kernel);
+
+        // Feed Random PrevLayer
+        int NumRows = NumVectors * InBlockDim;
+        double [][] InputData = new double[NumRows][NumInBlocks];
+        for (int i=0; i<NumVectors; ++i) {
+            double IntBit = i+1;
+            for (int j=0; j<InBlockDim; ++j) {
+                int RowAddr = i*InBlockDim + j;
+                for (int k=0; k<NumInBlocks; ++k) {
+                    InputData[RowAddr][k] = IntBit + 0.01*InBlockDim*k + 0.01*j;
+                }
+            }
+        }
+        List<Bits> Input = VectorDataGenerator(InputData, NumRows, NumInBlocks);
+        mgr.setInputDataRaw("Y", Input);
+
+        // Run Test
+        mgr.setKernelCycles(numTicks);
+        mgr.runTest();    
+    }
+    
+    // Input Data Generator
+    public static List<Bits> VectorDataGenerator(double [][] data, int VectorDepth, int VectorWidth) {
+        final List<Bits> encodedData = new ArrayList<Bits>(VectorDepth);
+        for (int i=0; i<VectorDepth; ++i) {
+            Bits thisStepBits = Def.DataType.encodeConstant(data[i][0]);
+            for (int j=1; j<VectorWidth; ++j){
+                thisStepBits = Def.DataType.encodeConstant(data[i][j]).cat(thisStepBits);
+            }
+            encodedData.add(thisStepBits);
+        }
+        return encodedData;
+    }
+}

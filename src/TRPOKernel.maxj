@@ -1,0 +1,71 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+
+import maxpower.AspectChangeIO;
+
+class TRPOKernel extends Kernel {
+
+    TRPOKernel(KernelParameters parameters)
+    
+    {
+    
+    super(parameters);
+
+    /////////////////////// Parameters ///////////////////////
+    
+    // Note: LayerSize here should be padded number
+    int NumLayers     = Def.NumLayers;
+    int  [] LayerSize = Def.LayerSize;
+    int  [] NumBlocks = Def.NumBlocks;
+    char [] AcFunc    = Def.AcFunc;
+
+    
+    /////////////////////// Control ///////////////////////
+    
+    // Tick
+    DFEVar Tick = control.count.simpleCounter(32);
+
+    // begin FVP - Initialisation, FVP Calculation, and FVP Read Back
+    DFEVar beginFVP = (Tick === 1);
+    
+
+    /////////////////////// Input ///////////////////////
+    
+    // Number of Samples - Scalar Input
+    DFEVar NumSamples = io.scalarInput("NumSamples", dfeUInt(32));
+    
+    // Observation Input to Kernel - cast to fix point
+    DFEVar EnObservationInput       = dfeUInt(1).newInstance(this);
+    DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.InputType, NumBlocks[0]);
+    AspectChangeIO ObservInput = new AspectChangeIO(this, 3072);
+    DFEVector<DFEVar> InVec = ObservInput.input("Observation", InVecType, EnObservationInput);
+    DFEVector<DFEVar> Observation   = InVec.cast(new DFEVectorType<DFEVar>(Def.yType, NumBlocks[0]));
+
+    // Bias and Std Input to Kernel - cast to fix point
+    DFEVar EnBiasStdInput  = dfeUInt(1).newInstance(this);
+    DFEVar InBiasStd       = io.input("BiasStd", Def.InputType, EnBiasStdInput);
+    DFEVar BiasStdInitData = InBiasStd.cast(Def.DataType);
+
+
+    /////////////////////// Fisher Vector Product Computation ///////////////////////
+
+    // Calculating Fisher Vector Product (FVP) via Customised Pearlmutter Propagation (CPP)
+    CPP FVPCalc = new CPP(this, NumLayers, LayerSize, NumBlocks, AcFunc, NumSamples, Observation, BiasStdInitData, beginFVP);
+    EnObservationInput <== FVPCalc.getEnObservationInput();
+    EnBiasStdInput     <== FVPCalc.getEnBiasStdInput();
+    DFEVar FVPResult     = FVPCalc.getFVPResult();
+    DFEVar FVPValid      = FVPCalc.isFVPResultValid();
+
+
+    /////////////////////// Output ///////////////////////
+    
+    // Output FVP Result
+    io.output("FVP", FVPResult.cast(Def.InputType), Def.InputType, FVPValid);
+
+
+    }
+
+}

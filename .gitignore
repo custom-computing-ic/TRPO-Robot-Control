@@ -1,0 +1,24 @@
+# git ignore setting
+
+# gedit backup files
+*~
+
+# object files
+*.o
+*.obj
+*.class
+
+# data files
+*.txt
+
+# build folder
+TRPO_*
+*Test/
+report/
+
+
+# git unignore setting
+!LICENSE.txt
+!SimpleTest*
+!PendulumTest*
+!SwimmerTest*

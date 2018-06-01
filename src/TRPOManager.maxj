@@ -1,0 +1,159 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelConfiguration;
+import com.maxeler.maxcompiler.v2.managers.custom.CustomManager;
+import com.maxeler.maxcompiler.v2.managers.custom.blocks.KernelBlock;
+import com.maxeler.maxcompiler.v2.managers.BuildConfig;
+import com.maxeler.maxcompiler.v2.managers.DFEArchitecture;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.CPUTypes;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.EngineInterface.Direction;
+import com.maxeler.maxcompiler.v2.managers.engine_interfaces.InterfaceParam;
+import com.maxeler.maxcompiler.v2.managers.custom.stdlib.LMemInterface;
+import com.maxeler.maxcompiler.v2.managers.custom.stdlib.LMemCommandGroup;
+import com.maxeler.maxcompiler.v2.managers.custom.stdlib.MemoryControllerConfig;
+import com.maxeler.maxcompiler.v2.build.EngineParameters;
+
+
+import java.lang.Math;
+
+public class TRPOManager extends CustomManager{
+
+    private static final String Name = "TRPOKernel";
+
+
+    TRPOManager(EngineParameters ep)
+    {
+        super(ep);
+
+        ///////////////////////// Configuration /////////////////////////
+
+        // Hardware Configuration
+        if (ep.getDFEModel().getDFEArchitecture() == DFEArchitecture.MAX4_Maia) {
+            
+            // Build Configuration
+            BuildConfig BuildCfg = new BuildConfig(BuildConfig.Level.FULL_BUILD);
+            BuildCfg.setBuildEffort(BuildConfig.Effort.VERY_HIGH);
+            BuildCfg.setOptimizationGoal(BuildConfig.OptimizationTechnique.AREA);
+            BuildCfg.setMPPRCostTableSearchRange(1, 16);
+            BuildCfg.setMPPRParallelism(8);
+            BuildCfg.setEnableTimingAnalysis(true);
+            setBuildConfig(BuildCfg);
+            
+            config.setDefaultStreamClockFrequency(Def.KernelFrequencyMAX4);
+            config.setAllowNonMultipleTransitions(true);
+            
+            // Set DRAM clock frequency: MAX4MAIA_400, MAX4MAIA_533, MAX4MAIA_666, MAX4MAIA_733, MAX4MAIA_800
+            config.setOnCardMemoryFrequency(LMemFrequency.MAX4MAIA_400);
+
+        }	
+		
+		// Simulation Configuration
+        getCurrentKernelConfig().simulation.setRAMAddressCollisionBehaviour(KernelConfiguration.SimulationOptions.SimulationBehaviour.IGNORE);
+
+
+        ///////////////////////// DRAM /////////////////////////
+        
+        MemoryControllerConfig MemCfg = new MemoryControllerConfig();
+        MemCfg.setBurstSize(8);
+        LMemInterface li = addLMemInterface();
+        li.setMemoryControllerConfig(MemCfg);
+        li.addStreamToLMem("toDRAM", LMemCommandGroup.MemoryAccessPattern.LINEAR_1D) <== addStreamFromCPU("fromCPU");
+
+
+        ///////////////////////// Kernel /////////////////////////
+
+        KernelBlock k = addKernel(new TRPOKernel(makeKernelParameters(Name)));
+        k.getInput("Observation") <== li.addStreamFromLMem("fromDRAM", LMemCommandGroup.MemoryAccessPattern.LINEAR_1D);
+        k.getInput("BiasStd")     <== addStreamFromCPU("BiasStd");
+        addStreamToCPU("FVP")     <== k.getOutput("FVP");
+    }
+
+    private static EngineInterface WriteDRAM() {
+
+        EngineInterface ei = new EngineInterface("WriteDRAM");
+
+        InterfaceParam size  = ei.addParam("size_bytes", CPUTypes.UINT32);
+        InterfaceParam start = ei.addParam("start_bytes", CPUTypes.UINT32);
+
+        ei.setStream("fromCPU", CPUTypes.DOUBLE, size);
+        ei.setLMemLinear("toDRAM", start, size);
+        ei.ignoreAll(Direction.IN_OUT);
+        
+        return ei;
+    }
+
+    private static EngineInterface RunTRPO() {
+
+        EngineInterface ei = new EngineInterface("Run");
+
+        // Parameters
+        int NumLayers     = Def.NumLayers;
+        int  [] LayerSize = Def.LayerSize;
+        int  [] NumBlocks = Def.NumBlocks;
+        int  [] BlockDim  = new int[Def.NumLayers];
+        for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
+
+
+        ///////////////////////// Inputs /////////////////////////
+
+        // NumSamples
+        InterfaceParam NumSamples = ei.addParam("NumSamples", CPUTypes.UINT32);
+        ei.setScalar(Name, "NumSamples", NumSamples);
+        
+        // Length of Weight and VWeight Initialisation Vector
+        int WeightInitVecLength = 0;
+        for (int i=0; i<NumLayers-1; ++i) {
+            WeightInitVecLength += 2 * BlockDim[i] * LayerSize[i+1];
+        }
+        
+        // Length of Observation Vector
+        // Remarks: Due to DRAM Requirements, it's padded to a multiple of 48 in host
+        InterfaceParam PaddedObservVecItems = ei.addParam("PaddedObservVecItems", CPUTypes.UINT32);
+        ei.setLMemLinear("fromDRAM", ei.addConstant(0L), PaddedObservVecItems*CPUTypes.DOUBLE.sizeInBytes());
+        
+        // Length of Bias, VBias and Std Stream
+        int BiasStdVecLength = LayerSize[NumLayers-1];
+        for (int i=1; i<NumLayers; ++i) {
+            BiasStdVecLength += 2*LayerSize[i];
+        }
+        
+        int BiasStdSize = CPUTypes.DOUBLE.sizeInBytes() * BiasStdVecLength;
+        ei.setStream("BiasStd", CPUTypes.DOUBLE, BiasStdSize);        
+
+
+        ///////////////////////// Output /////////////////////////
+        
+        // Length of FVP Result, padded to a multiple of 2
+        int FVPLength = 0;
+        for (int i=0; i<NumLayers-1; ++i) {
+            FVPLength += LayerSize[i] * LayerSize[i+1];
+            FVPLength += LayerSize[i+1];
+        }
+        int PaddedFVPLength = ((int)Math.ceil((double)FVPLength/2))*2;
+        ei.setStream("FVP", CPUTypes.DOUBLE, CPUTypes.DOUBLE.sizeInBytes()*PaddedFVPLength);
+
+
+        ///////////////////////// Ticks /////////////////////////
+
+        // Number of Ticks
+        int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+        int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+        int BwdPropCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+        int PropCyclesPerSample    = Math.max(FwdPropCyclesPerSample, BwdPropCyclesPerSample);
+        InterfaceParam NumTicks = WeightInitVecLength + PropCyclesPerSample*(NumSamples+1) + PaddedFVPLength + 20;
+        ei.setTicks(Name, NumTicks);
+
+        ei.ignoreAll(Direction.IN_OUT);
+        return ei;
+    }
+
+    // Main Function
+    public static void main(String[] args) {
+    
+        TRPOManager manager = new TRPOManager(new EngineParameters(args));
+        manager.createSLiCinterface(WriteDRAM());
+        manager.createSLiCinterface(RunTRPO());
+        manager.suppressDefaultInterface();
+        manager.build();
+    }
+    
+}

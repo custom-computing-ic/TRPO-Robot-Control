@@ -1,0 +1,83 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
+import com.maxeler.maxcompiler.v2.utils.Bits;
+
+import java.util.List;
+import java.util.ArrayList;
+
+
+class Def {
+
+
+    ///////////////////////// TRPO Parameters /////////////////////////
+
+    // Kernel Settings
+    public static final int NumLayers     = 4;
+    public static final int BufferDepth   = 2;
+    public static final char [] AcFunc    = {'l', 't', 't', 'l'};
+
+//    public static final int  [] LayerSize = { 32, 64, 64, 8};
+//    public static final int  [] NumBlocks = {  4,  4,  4, 4};
+//    public static final int  [] LayerSize = {120, 64, 35, 8};
+//    public static final int  [] NumBlocks = { 24,  8,  7, 8};
+    public static final int  [] LayerSize = {384,128, 66, 18};
+    public static final int  [] NumBlocks = { 32,  8,  6,  6};
+
+
+
+    ///////////////////////// FPGA Settings /////////////////////////
+        
+    public static final int KernelFrequencyMAX4 = 200;
+    public static final int MaxFanout = 16;
+    public static final double PipelineFactorDiv     = 1.0;
+    public static final double PipelineFactorMult    = 1.0;
+    public static final double PipelineFactorDefault = 1.0;
+
+
+    ///////////////////////// Data Types /////////////////////////
+
+    // Input Type
+    public static final DFEType InputType = KernelLib.dfeFloat(11, 53);
+    
+    // Number of Fractional Bits - affects accuracy
+    public static final int FracBits = 23;
+
+    // Fix-Point Data Type for Weight, VWeight, Bias, VBias, Std
+    public static final DFEType DataType = KernelLib.dfeFix(4, FracBits, SignMode.TWOSCOMPLEMENT);
+    
+    // Fix-Point Data Type of y and Ry
+    public static final DFEType  yType = KernelLib.dfeFix(4, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType RyType = KernelLib.dfeFix(9, FracBits, SignMode.TWOSCOMPLEMENT);
+    
+    // RG, RGW, RGB, ReadBackType
+    public static final DFEType RGType  = KernelLib.dfeFix(10, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType RGWType = KernelLib.dfeFix(20, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType RGBType = KernelLib.dfeFix(20, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType ReadBackType = KernelLib.dfeFix(20, FracBits, SignMode.TWOSCOMPLEMENT);
+    
+    // For Accumulator
+    public static final DFEType AccType = KernelLib.dfeFix(20, FracBits, SignMode.TWOSCOMPLEMENT);
+    
+    // For tanh() Activation Function - current AcExpType supports inputs within [-9, 9]
+    public static final DFEType AcInType  = KernelLib.dfeFix(6, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType AcExpType = KernelLib.dfeFix(26, FracBits, SignMode.UNSIGNED);
+
+
+    ///////////////////////// Software Utility Functions /////////////////////////
+
+    // Float Input Data Generator
+    public static List<Bits> FloatVectorDataGenerator(double [][] data, int numTicks, int VectorWidth) {
+        final List<Bits> encodedData = new ArrayList<Bits>(numTicks);
+        for (int i=0; i<numTicks; ++i) {
+            Bits thisStepBits = InputType.encodeConstant(data[i][0]);
+            for (int j=1; j<VectorWidth; ++j){
+                thisStepBits = InputType.encodeConstant(data[i][j]).cat(thisStepBits);
+            }
+            encodedData.add(thisStepBits);
+        }
+        return encodedData;
+    }
+
+
+}

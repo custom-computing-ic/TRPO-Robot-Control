@@ -1,0 +1,91 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.memory.Memory;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Mem.RamWriteMode;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
+
+
+import java.lang.Math;
+
+/**
+ * Storage for Std
+ *
+ * @author Patrick Shao
+ *
+ * @param <BlockDim> Block Dimension of the Std Vector - should equal to BlockDim[NumLayers-1]
+ * @param <NumBlocks> Vector Width of Std Vector - should be equal to NumBlocks[NumLayers-1]
+ * @param <DataIn> Std to be stored in the buffer
+ * @param <beginInit> Begin writing Std to buffer
+ * @param <beginRead> Begin reading a Std vector from buffer
+ *
+ * Note: To save computational resources, (1/Std[i])^2 is stored instead of Std[i]
+ *
+ */
+
+class StdBuffer extends KernelLib{
+
+    private DFEVector<DFEVar> Std;
+    public  DFEVector<DFEVar> getStd()          {return Std;}
+
+    StdBuffer(  KernelLib owner,
+                int BlockDim,
+                int NumBlocks,
+                DFEVar DataIn,
+                DFEVar beginInit,
+                DFEVar beginRead,
+                DFEVar isReadValid)
+    {
+    
+    super(owner);
+    
+    /////////////////////// Control ///////////////////////
+
+    // Initialisation Control
+    AddrGenerator StdInitCounter = new AddrGenerator(owner, 1, NumBlocks*BlockDim, beginInit);
+    DFEVar isStdInit = StdInitCounter.isValid();
+
+    // R/W Port: Init Std Data
+    DFEVar Reset = beginInit | beginRead;
+    Count.Params PortAddrColCounterParam = control.count.makeParams(Math.max(MathUtils.bitsToAddress(BlockDim),1))
+                                                  .withInitValue(0)
+                                                  .withMax(BlockDim)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(Reset);
+    Counter PortAddrColCounter = control.count.makeCounter(PortAddrColCounterParam);
+    DFEVar PortAddrCol = PortAddrColCounter.getCount();
+
+    // YCount - Selecting the block to write to according to Y
+    Count.Params YCounterParam = control.count.makeParams(Math.max(MathUtils.bitsToAddress(NumBlocks),1))
+                                                  .withInitValue(0)
+                                                  .withMax(NumBlocks)
+                                                  .withEnable(PortAddrColCounter.getWrap())
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginInit);
+    Counter YCounter = control.count.makeCounter(YCounterParam);
+    DFEVar YCount = YCounter.getCount(); 
+    
+    // R Port: Read Std Data
+    AddrGenerator ReadAddrColCounter = new AddrGenerator(this, 1, BlockDim, beginRead, isReadValid);
+    DFEVar ReadAddrCol = ReadAddrColCounter.getAddr();
+
+
+    /////////////////////// Memory ///////////////////////
+
+    // Memory Block
+    Std = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks).newInstance(this);
+    for (int Y=0; Y<NumBlocks; ++Y) {
+        Memory<DFEVar> Block = mem.alloc(Def.DataType, Math.max(BlockDim,2));
+        Block.port(PortAddrCol, DataIn, isStdInit & (Y===YCount), RamWriteMode.WRITE_FIRST);
+        Std[Y] <== Block.read(ReadAddrCol);
+    }
+    
+//    debug.simPrintf(isStdInit, "[%4d] Init Block[%d] AddrCol=%d | Std[0:3]=(%.12f, %.12f, %.12f, %.12f) | Note (1/Std[i])^2 is stored.\n", control.count.simpleCounter(32), YCount, PortAddrCol, Std[0], Std[1], Std[2], Std[3]);
+
+    }
+
+}
