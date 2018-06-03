@@ -1,6 +1,7 @@
 #ifndef TRPO_H
 #define TRPO_H
 
+#include <stddef.h>
 
 typedef struct {
 
@@ -40,5 +41,35 @@ typedef struct {
     
     
 } TRPOparam;
+
+
+// Utility function calculating the number of trainable parameters
+size_t NumParamsCalc (size_t * LayerSize, size_t NumLayers);
+
+// Utility Function Calculating the Max
+static inline double max(double record, double cur);
+
+// Original FVP Computation Function on CPU
+// FP + BP + Pearlmutter FP + Pearlmutter BP
+double FVP(TRPOparam param, double *Result, double *Input);
+
+// Fast FVP Computation Function on CPU
+// Combined FP + Pearlmutter BP
+double FVPFast(TRPOparam param, double *Result, double *Input, size_t NumThreads);
+
+// CG Computation on CPU
+double CG(TRPOparam param, double *Result, double *b, size_t MaxIter, double ResidualTh, size_t NumThreads);
+
+// FVP Computation on FPGA
+double FVP_FPGA(TRPOparam param, double *Result, double *Input);
+
+// CG Computation on FPGA
+double CG_FPGA(TRPOparam param, double *Result, double *b, size_t MaxIter, double ResidualTh, size_t NumThreads);
+
+// TRPO All-In-One on CPU
+double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads);
+
+
+
 
 #endif

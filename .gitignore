@@ -12,9 +12,10 @@
 *.txt
 
 # build folder
-TRPO_*
+TRPO_*/
 *Test/
 report/
+build/TRPO_*
 
 
 # git unignore setting
