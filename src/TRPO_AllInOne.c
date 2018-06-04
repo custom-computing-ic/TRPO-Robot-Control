@@ -8,19 +8,11 @@
 #include "TRPO.h"
 
 
-double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
+double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
 
     //////////////////// Remarks ////////////////////
 
-    // This function computes the Fisher-Vector Product using Pearlmutter Algorithm
-    // This version is customised to the case that KL is used as loss function
-    // Input: the vector to be multiplied with the Fisher Information Matrix
-    // Result: the Fisher-Vector Product
-    // Remarks: The length of Input and Result must be the number of all trainable parameters in the network
-
-    // Step1: Combined forward propagation
-    // Step2: Pearlmutter backward propagation
-
+    // Result: Updated Policy Parameters
 
     //////////////////// Read Parameters ////////////////////
 
@@ -45,7 +37,7 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
     size_t pos;
 
 
-    //////////////////// Memory Allocation - Neural Network ////////////////////
+    //////////////////// Memory Allocation - Model ////////////////////
     
     // W[i]: Weight Matrix from Layer[i] to Layer[i+1]
     // B[i]: Bias Vector from Layer[i] to Layer[i+1]
@@ -57,24 +49,25 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
         W[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
         B[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
     }
+    
+    // LogStd[i] is the log of std[i] in the policy
+    double * LogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
 
 
-    //////////////////// Memory Allocation - Input Vector ////////////////////
+    //////////////////// Memory Allocation - Policy Gradient ////////////////////
 
-    // The Input Vector is to be multiplied with the Hessian Matrix of KL to derive the Fisher Vector Product
-    // There is one-to-one correspondence between the input vector and all trainable parameters in the neural network
-    // As a result, the shape of the Input Vector is the same as that of the parameters in the model
-    // The only difference is that the Input Vector is stored in a flattened manner
-    // There is one-to-one correspondence between: VW[i] and W[i], VB[i] and B[i], VStd[i] and Std[i]
-    double * VW [NumLayers-1];
-    double * VB [NumLayers-1];
+    // The Policy Gradient Vector (PG) is the gradient of Surrogate Loss w.r.t. to policy parameters
+    // -PG is the input to the Conjugate Gradient (CG) function
+    // There is one-to-one correspondence between PG and policy parameters (W and B of neural network, LogStd)
+    double * PGW [NumLayers-1];
+    double * PGB [NumLayers-1];
     for (size_t i=0; i<NumLayers-1; ++i) {
-        VW[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
-        VB[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
+        PGW[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
+        PGB[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
     }
     
-    // Allocate Memory for Input Vector corresponding to LogStd
-    double * VLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
+    // Allocate Memory for Policy Gradient corresponding to LogStd
+    double * PGLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
 
 
     //////////////////// Memory Allocation - Simulation Data ////////////////////
@@ -93,13 +86,29 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
     double * Advantage = (double *) calloc(NumSamples, sizeof(double));
     
     
-    //////////////////// Memory Allocation - Ordinary Forward Propagation ////////////////////
+    //////////////////// Memory Allocation - Ordinary Forward and Backward Propagation ////////////////////
 
     // Layer[i] : Memory of each layer's outputs, i.e. y_i
+    // GLayer[i]: Gradient of Loss Function w.r.t. the pre-activation values in Layer[i], i.e. d(Loss)/d(x_i)
     double * Layer  [NumLayers];
+    double * GLayer [NumLayers];
     for (size_t i=0; i<NumLayers; ++i) {
         Layer[i]  = (double *) calloc(LayerSize[i], sizeof(double));
+        GLayer[i] = (double *) calloc(LayerSize[i], sizeof(double));
     }
+
+    // GW[i]: Gradient of Loss Function w.r.t to Neural Network Weight W[i]
+    // GB[i]: Gradient of Loss Function w.r.t to Neural Network Bias B[i]
+    // There is one-to-one correspondence between: GW[i] and W[i], GB[i] and B[i], GStd[i] and Std[i]
+    double * GW [NumLayers-1];
+    double * GB [NumLayers-1];
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        GW[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
+        GB[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
+    }
+
+    // GLogStd[i]: Gradient of Loss Function w.r.t LogStd[i]
+    double * GLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
 
 
     //////////////////// Memory Allocation - Pearlmutter Forward and Backward Propagation ////////////////////
@@ -125,9 +134,12 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
         RGW[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
         RGB[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
     }
-    
-    
-    //////////////////// Load Neural Network ////////////////////
+
+    // RGLogStd[i]: R{} Gradient of KL w.r.t LogStd[i]
+    double * RGLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
+
+
+    //////////////////// Load Model ////////////////////
     
     // Open Model File that contains Weights, Bias and std
     FILE *ModelFilePointer = fopen(ModelFile, "r");
@@ -153,15 +165,14 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
     }
 
     // Read LogStd from file
-    // Remarks: actually this LogStd will be overwritten by the Std from the datafile
     for (size_t k=0; k<ActionSpaceDim; ++k) {
-        fscanf(ModelFilePointer, "%lf", &Std[k]);
+        fscanf(ModelFilePointer, "%lf", &LogStd[k]);
     }
 
     // Close Model File
     fclose(ModelFilePointer);
     
-    
+/*    
     //////////////////// Load Input Vector and Init Result Vector ////////////////////
     
     pos = 0;
@@ -186,7 +197,7 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
         Result[pos] = 0;
         pos++;
     }
-    
+*/    
     
     //////////////////// Load Simulation Data ////////////////////
     
@@ -197,9 +208,9 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
         return -1;
     }
     
-    // Read Mean, Std and Observation
-    // Remarks: Std is the same for all samples, and appears in every line in the data file
-    //          so we are writing the same Std again and again to the same place.
+    // Read Mean, LogStd and Observation
+    // Remarks: LogStd is the same for all samples, and appears in every line in the data file
+    //          so we are writing the same LogStd again and again to the same place.
     for (size_t i=0; i<NumSamples; ++i) {
         // Read Mean
         for (size_t j=0; j<ActionSpaceDim; ++j) {
@@ -225,12 +236,146 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
     fclose(DataFilePointer);
     
     
-    //////////////////// Main Loop Over All Samples ////////////////////
+    //////////////////// Main Computation ////////////////////
 
     // Measure Elapsed Time
     struct timeval tv1, tv2;
     gettimeofday(&tv1, NULL);
 
+
+    //////////////////// Computing Policy Gradient ////////////////////
+
+    for (size_t iter=0; iter<NumSamples; iter++) {
+    
+        //////////////////// Ordinary Forward Propagation ////////////////////
+    
+        // Assign Input Values
+        for (size_t i=0; i<ObservSpaceDim; ++i) Layer[0][i] = Observ[iter*ObservSpaceDim+i];
+    
+        // Forward Propagation
+        for (size_t i=0; i<NumLayers-1; ++i) {
+            
+            // Propagate from Layer[i] to Layer[i+1]
+            for (size_t j=0; j<LayerSize[i+1]; ++j) {
+                
+                // Calculating pre-activated value for item[j] in next layer
+                Layer[i+1][j] = B[i][j];
+                for (size_t k=0; k<LayerSize[i]; ++k) {
+                    // From Neuron #k in Layer[i] to Neuron #j in Layer[i+1]
+                    Layer[i+1][j] += Layer[i][k] * W[i][k*LayerSize[i+1]+j];
+                }
+            
+                // Apply Activation Function
+                switch (AcFunc[i+1]) {
+                    // Linear Activation Function: Ac(x) = (x)
+                    case 'l': {break;}
+                    // tanh() Activation Function
+                    case 't': {Layer[i+1][j] = tanh(Layer[i+1][j]); break;}
+                    // 0.1x Activation Function
+                    case 'o': {Layer[i+1][j] = 0.1*Layer[i+1][j]; break;}
+                    // sigmoid Activation Function
+                    case 's': {Layer[i+1][j] = 1.0/(1+exp(-Layer[i+1][j])); break;}
+                    // Default: Activation Function not supported
+                    default: {
+                        printf("[ERROR] Activation Function for Layer [%zu] is %c. Unsupported.\n", i+1, AcFunc[i+1]);
+                        return -1;
+                    }
+                }
+            }
+        }
+        
+        //////////////////// Ordinary Backward Propagation ////////////////////         
+
+        // Gradient Initialisation
+        // Assign the derivative of Surrogate Loss w.r.t. Mean (output values from the final layer) and LogStd
+        for (size_t i=0; i<ActionSpaceDim; ++i) {
+            double temp = (Action[iter*ActionSpaceDim+i] - Mean[iter*ActionSpaceDim+i]) / exp(LogStd[i]);
+            GLayer[NumLayers-1][i] = Advantage[iter] * temp / exp(LogStd[i]);
+            GLogStd[i] = Advantage[iter] * (temp * temp - 1);
+        }
+
+        // Backward Propagation
+        for (size_t i=NumLayers-1; i>0; --i) {
+       
+            // Propagate from Layer[i] to Layer[i-1]
+            for (size_t j=0; j<LayerSize[i]; ++j) {
+
+                // Differentiate the activation function
+                switch (AcFunc[i]) {
+                    // Linear Activation Function: Ac(x) = (x)
+                    case 'l': {break;}
+                    // tanh() Activation Function: tanh' = 1 - tanh^2
+                    case 't': {GLayer[i][j] = GLayer[i][j] * (1- Layer[i][j] * Layer[i][j]); break;}
+                    // 0.1x Activation Function
+                    case 'o': {GLayer[i][j] = 0.1 * GLayer[i][j]; break;}
+                    // sigmoid Activation Function: sigmoid' = sigmoid * (1 - sigmoid)
+                    case 's': {GLayer[i][j] = GLayer[i][j] * Layer[i][j] * (1- Layer[i][j]); break;}
+                    // Default: Activation Function not supported
+                    default: {
+                        fprintf(stderr, "[ERROR] Activation Function for Layer[%zu] is %c. Unsupported.\n", i, AcFunc[i]);
+                        return -1;
+                    }
+                }
+                
+                // The derivative w.r.t to Bias is the same as that w.r.t. the pre-activated value
+                GB[i-1][j] = GLayer[i][j];
+            }
+        
+            // Calculate the derivative w.r.t. to Weight
+            for (size_t j=0; j<LayerSize[i-1]; ++j) {
+                for (size_t k=0; k<LayerSize[i]; ++k) {
+                    // The Derivative w.r.t. to the weight from Neuron #j in Layer[i-1] to Neuron #k in Layer[i]
+                    GW[i-1][j*LayerSize[i]+k] = GLayer[i][k] * Layer[i-1][j];
+                }
+            }
+        
+            // Calculate the derivative w.r.t. the output values from Layer[i]
+            for (size_t j=0; j<LayerSize[i-1]; ++j) {
+                GLayer[i-1][j] = 0;
+                for (size_t k=0; k<LayerSize[i]; ++k) {
+                    // Accumulate the Gradient from Neuron #k in Layer[i] to Neuron #j in Layer[i-1]
+                    GLayer[i-1][j] += GLayer[i][k] * W[i-1][j*LayerSize[i]+k];
+                }
+            }
+        
+        }
+
+        
+        // Accumulate the Gradient to Result
+        pos = 0;
+        for (size_t i=0; i<NumLayers-1; ++i) {
+            size_t curLayerDim = LayerSize[i];
+            size_t nextLayerDim = LayerSize[i+1];
+            for (size_t j=0; j<curLayerDim;++j) {
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    Result[pos] += GW[i][j*nextLayerDim+k];
+                    pos++;
+                }
+            }
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                Result[pos] += GB[i][k];
+                pos++;
+            }
+        }
+        for (size_t k=0; k<ActionSpaceDim; ++k) {
+            Result[pos] += GLogStd[k];
+            pos++;
+        }
+
+    
+    } // End of iteration over current sample
+
+    // Averaging Policy Gradient Result over the samples
+    #pragma omp parallel for
+    for (size_t i=0; i<pos; ++i) {
+        Result[i] = Result[i] / (double)NumSamples;
+    }  
+
+    // Policy Gradient Computation finishes, Check Policy Gradient Result
+    
+
+
+/*
     for (size_t iter=0; iter<NumSamples; iter++) {
     
         //////////////////// Combined Forward Propagation ////////////////////
@@ -392,24 +537,42 @@ double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads) {
     for (size_t i=0; i<pos; ++i) {
         Result[i] = Result[i] / (double)NumSamples + CG_Damping * Input[i];
     }
-
+*/
     gettimeofday(&tv2, NULL);
     double runtimeS = ((tv2.tv_sec-tv1.tv_sec) * (double)1E6 + (tv2.tv_usec-tv1.tv_usec)) / (double)1E6;
 
     //////////////////// Clean Up ////////////////////
 
-    // clean up
-    for (size_t i=0; i<NumLayers; ++i) {
-        free(Layer[i]); free(RxLayer[i]); free(RyLayer[i]); free(RGLayer[i]);
-    }
+    // Model - From Model File
     for (size_t i=0; i<NumLayers-1; ++i) {
-        free(W[i]); free(VW[i]); free(RGW[i]);
-        free(B[i]); free(VB[i]); free(RGB[i]);
+        free(W[i]); free(B[i]);
     }
-    free(Observ); free(Mean); free(Std); free(Action); free(Advantage); free(VLogStd);
+    free(LogStd);
+
+    // Simulation Data - From Data File
+    free(Observ); free(Mean); free(Std); free(Action); free(Advantage);
+    
+    // Forward and Backward Propagation
+    for (size_t i=0; i<NumLayers; ++i) {
+        // Ordinary Forward and Backward Propagation
+        free(Layer[i]); free(GLayer[i]);
+        // Pearlmutter Forward and Backward Propagation
+        free(RxLayer[i]); free(RyLayer[i]); free(RGLayer[i]);
+    }
+    
+    // Gradient
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        // Gradient - temporary storage
+        free(GW[i]); free(GB[i]);    
+        // Policy Gradient
+        free(PGW[i]); free(PGB[i]);
+        // Pearlmutter R{} Gradient
+        free(RGW[i]); free(RGB[i]);
+    }
+    
+    // Gradient - LogStd
+    free(GLogStd); free(PGLogStd); free(RGLogStd);
 
     return runtimeS;
-
-
 
 }

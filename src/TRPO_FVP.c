@@ -102,7 +102,7 @@ double FVP (TRPOparam param, double *Result, double *Input){
     //////////////////// Memory Allocation - Ordinary Forward and Backward Propagation ////////////////////
 
     // Layer[i] : Memory of each layer's outputs, i.e. y_i
-    // GLayer[I]: Gradient of KL w.r.t. the pre-activation values in Layer[i], i.e. d(KL)/d(x_i)
+    // GLayer[i]: Gradient of KL w.r.t. the pre-activation values in Layer[i], i.e. d(KL)/d(x_i)
     double * Layer  [NumLayers];
     double * GLayer [NumLayers];
     for (size_t i=0; i<NumLayers; ++i) {

@@ -309,16 +309,77 @@ void Test_CG_FPGA(size_t NumThreads)
 }
 
 
+void Test_TRPO(size_t NumThreads)
+{
+	
+    // ArmDOF_0-v0
+    char AcFunc [] = {'l', 't', 't', 'l'};
+    size_t LayerSize [] = {15, 16, 16, 3};
+
+    char * ModelFileName = "ArmTestModel.txt";
+    char * DataFileName  = "ArmTestData.txt";
+    char * CGFileName    = "ArmTestCG.txt";
+
+    TRPOparam Param;
+    Param.ModelFile  = ModelFileName;
+    Param.DataFile   = DataFileName;
+    Param.NumLayers  = 4;
+    Param.AcFunc     = AcFunc;
+    Param.LayerSize  = LayerSize;
+    Param.NumSamples = 2400;
+    Param.CG_Damping = 0.1;
+
+    // Open Simulation Data File that contains test data
+    FILE *DataFilePointer = fopen(CGFileName, "r");
+    if (DataFilePointer==NULL) {
+        fprintf(stderr, "[ERROR] Cannot open Data File [%s]. \n", CGFileName);
+        return;
+    }
+
+    // Memory Allocation
+    size_t NumParams = NumParamsCalc(Param.LayerSize, Param.NumLayers);
+    double * input   = (double *) calloc(NumParams, sizeof(double));
+    double * result  = (double *) calloc(NumParams, sizeof(double));
+    double * expect  = (double *) calloc(NumParams, sizeof(double)); 
+    
+    // Read Input and Expect
+    for (size_t i=0; i<NumParams; ++i) {
+         fscanf(DataFilePointer, "%lf %lf", &expect[i], &input[i]);
+    }
+    fclose(DataFilePointer);
+    
+    printf("----------------------- TRPO Update Test (%zu Threads) ------------------------\n", NumThreads);
+    double compTime = TRPO(Param, result, NumThreads);
+    if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
+
+    // Check Result
+    double percentage_err = 0;
+    for (size_t i=0; i<NumParams; ++i) {        
+        double cur_err = fabs( (result[i]-expect[i])/expect[i] ) * 100;
+    	if (expect[i] != 0) percentage_err += cur_err;
+    	if (cur_err>1) printf("Actual[%zu]=%e, Expect=%e. %.4f%% Difference\n", i, result[i], expect[i], cur_err);
+    }
+    percentage_err = percentage_err / (double)NumParams;
+    printf("\n[INFO] CPU Computing Time = %f seconds\n", compTime);
+    printf("[INFO] TRPO Update Mean Absolute Percentage Error = %.4f%%\n", percentage_err);
+    printf("---------------------------------------------------------------------\n\n");
+
+    // Clean Up    
+    free(input); free(result); free(expect);
+    
+    return;
+}
+
+
 
 int main()
 {
 
     //////////////////// Fisher Vector Product Computation ////////////////////
     
-
 //    Test_FVP(6);
-    Test_CG(6);
-
+//    Test_CG(6);
+    Test_TRPO(6);
 
     //////////////////// FPGA ////////////////////
 

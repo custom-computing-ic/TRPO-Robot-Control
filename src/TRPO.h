@@ -67,7 +67,7 @@ double FVP_FPGA(TRPOparam param, double *Result, double *Input);
 double CG_FPGA(TRPOparam param, double *Result, double *b, size_t MaxIter, double ResidualTh, size_t NumThreads);
 
 // TRPO All-In-One on CPU
-double TRPO(TRPOparam param, double *Result, double *Input, size_t NumThreads);
+double TRPO(TRPOparam param, double *Result, size_t NumThreads);
 
 
 
