@@ -110,7 +110,7 @@ void Test_CG(size_t NumThreads)
     }
     fclose(DataFilePointer);
     
-    printf("----------------------- Swimmer CG Test (%zu Threads) ------------------------\n", NumThreads);
+    printf("----------------------- ArmDOF CG Test (%zu Threads) ------------------------\n", NumThreads);
     double compTime = CG(Param, result, input, 10, 1e-10, NumThreads);
     if (compTime<0) fprintf(stderr, "[ERROR] Conjugate Gradient Calculation Failed.\n");
     
@@ -344,7 +344,7 @@ void Test_TRPO(size_t NumThreads)
     
     // Read Input and Expect
     for (size_t i=0; i<NumParams; ++i) {
-         fscanf(DataFilePointer, "%lf %lf", &expect[i], &input[i]);
+         fscanf(DataFilePointer, "%lf %lf", &input[i], &expect[i]);
     }
     fclose(DataFilePointer);
     
@@ -357,7 +357,7 @@ void Test_TRPO(size_t NumThreads)
     for (size_t i=0; i<NumParams; ++i) {        
         double cur_err = fabs( (result[i]-expect[i])/expect[i] ) * 100;
     	if (expect[i] != 0) percentage_err += cur_err;
-    	if (cur_err>1) printf("Actual[%zu]=%e, Expect=%e. %.4f%% Difference\n", i, result[i], expect[i], cur_err);
+    	//if (cur_err>1) printf("Actual[%zu]=%e, Expect=%e. %.4f%% Difference\n", i, result[i], expect[i], cur_err);
     }
     percentage_err = percentage_err / (double)NumParams;
     printf("\n[INFO] CPU Computing Time = %f seconds\n", compTime);
