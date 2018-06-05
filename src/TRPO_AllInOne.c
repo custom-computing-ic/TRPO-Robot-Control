@@ -29,6 +29,11 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
     const double CG_Damping = param.CG_Damping;
     double ResidualTh       = 1e-10;
     size_t MaxIter          = 10;
+    double MaxKL            = 0.01;
+    double MaxBackTracks    = 10;
+    double AcceptRatio      = 0.1;
+
+
 
     // Dimension of Observation Space
     const size_t ObservSpaceDim = LayerSize[0];
@@ -145,13 +150,26 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
     double * RGLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
 
 
-    //////////////////// Memory Allocation - Conjugate Gradient ////////////////////
+    //////////////////// Memory Allocation - Conjugate Gradient (CG) ////////////////////
 
+    // These names correspond to the names in the TRPO Python code
     double * b = (double *) calloc(NumParams, sizeof(double));
     double * p = (double *) calloc(NumParams, sizeof(double));
     double * r = (double *) calloc(NumParams, sizeof(double));
     double * x = (double *) calloc(NumParams, sizeof(double));
     double * z = (double *) calloc(NumParams, sizeof(double));
+    
+    
+    //////////////////// Memory Allocation - Line Search ////////////////////
+
+    // These names correspond to the names in the TRPO Python code
+    // Note: In Line Search we also need a vector called x
+    //       Here we just use the x declared for Conjugate Gradient for simlicity
+    //       The x used in Line Search has nothing to do with the x used in CG
+    //       They just have the same type and size
+    double * fullstep = (double *) calloc(NumParams, sizeof(double));
+    double * theta    = (double *) calloc(NumParams, sizeof(double));
+    double * xnew     = (double *) calloc(NumParams, sizeof(double));
 
 
     //////////////////// Load Model ////////////////////
@@ -353,7 +371,8 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
     
     } // End of iteration over current sample
     
-    // Averaging Policy Gradient over the samples
+    // Averaging Policy Gradient over the samples - Policy Gradient is held in b
+    // Note this corresponds to -g in the Python code: b = -g
     #pragma omp parallel for
     for (size_t i=0; i<pos; ++i) {
         b[i] = b[i] / (double)NumSamples;
@@ -365,8 +384,9 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
     ///////// Conjugate Gradient /////////
 
     // This function implements Conjugate Gradient algorithm to solve linear equation Ax=b
-    //     Result: The Conjugate Gradient Result, i.e. solution x to Ax=b
-    //          b: Vector b in the equation Ax=b
+    //     x: The Conjugate Gradient Result, i.e. solution x to Ax=b
+    //        In TRPO context, x is the Step Direction of the line search (stepdir in the Python code)
+    //     b: Vector b in the equation Ax=b
 
     // Initialisation
     double rdotr = 0;
@@ -607,9 +627,381 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
         rdotr = newrdotr;
 
     }
+
+    // Now x is the Step Direction of the line search (stepdir in the Python code)
+
+    // Calculate another Fisher Vector Product - code reuse opportunity
     
-    // Copy CG Result
-    for (size_t i=0; i<NumParams; ++i) Result[i] = x[i];
+    ///////// Fisher Vector Product Computation z = FVP(x) /////////
+        
+    // Init PGW, PGB, PGLogStd from x
+    // Init z to 0
+    pos = 0;
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        size_t curLayerDim  = LayerSize[i];
+        size_t nextLayerDim = LayerSize[i+1];
+        for (size_t j=0; j<curLayerDim;++j) {
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                PGW[i][j*nextLayerDim+k] = x[pos];
+                z[pos] = 0;
+                pos++;
+            }
+        }
+    for (size_t k=0; k<nextLayerDim; ++k) {
+            PGB[i][k] = x[pos];
+            z[pos] = 0;
+            pos++;
+        }
+    }
+    for (size_t k=0; k<ActionSpaceDim; ++k) {
+        PGLogStd[k] = x[pos];
+        z[pos] = 0;
+        pos++;
+    }
+        
+    for (size_t iter=0; iter<NumSamples; iter++) {
+    
+        ///////// Combined Forward Propagation /////////
+    
+        // Initialise the Input Layer
+        for (size_t i=0; i<ObservSpaceDim; ++i) {
+              Layer[0][i] = Observ[iter*ObservSpaceDim+i];
+            RxLayer[0][i] = 0;
+            RyLayer[0][i] = 0;
+        }
+    
+        // Forward Propagation
+        for (size_t i=0; i<NumLayers-1; ++i) {
+
+            size_t CurrLayerSize = LayerSize[i];
+            size_t NextLayerSize = LayerSize[i+1];
+            size_t j, k;
+            
+            // Propagate from Layer[i] to Layer[i+1]
+            #pragma omp parallel for private(j,k) shared(Layer, RxLayer, RyLayer, W, PGW, B, PGB, AcFunc) schedule(static)
+            for (j=0; j<NextLayerSize; ++j) {
+                
+                // Initialise x_j and R{x_j} in next layer
+                // Here we just use y_j's memory space to store x_j temoporarily
+                  Layer[i+1][j] = B[i][j];
+                RxLayer[i+1][j] = PGB[i][j];
+                
+                for (k=0; k<CurrLayerSize; ++k) {
+                    // From Neuron #k in Layer[i] to Neuron #j in Layer[i+1]
+                      Layer[i+1][j] +=   Layer[i][k] *   W[i][k*NextLayerSize+j];
+                    RxLayer[i+1][j] += RyLayer[i][k] *   W[i][k*NextLayerSize+j];
+                    RxLayer[i+1][j] +=   Layer[i][k] * PGW[i][k*NextLayerSize+j];
+                }
+
+                // Calculate y_j and R{y_j} in next layer. Note that R{y_j} depends on y_j
+                switch (AcFunc[i+1]) {
+                    // Linear Activation Function: Ac(x) = (x)
+                    case 'l': {
+                        RyLayer[i+1][j] = RxLayer[i+1][j];
+                        break;
+                    }
+                    // tanh() Activation Function
+                    case 't': {
+                          Layer[i+1][j] = tanh(Layer[i+1][j]);
+                        RyLayer[i+1][j] = RxLayer[i+1][j] * (1 - Layer[i+1][j] * Layer[i+1][j]);
+                        break;
+                    }
+                    // 0.1x Activation Function
+                    case 'o': {
+                          Layer[i+1][j] = 0.1 *   Layer[i+1][j];
+                        RyLayer[i+1][j] = 0.1 * RxLayer[i+1][j];
+                        break;
+                    }
+                    // sigmoid Activation Function
+                    case 's': {
+                          Layer[i+1][j] = 1.0 / ( 1 + exp(-Layer[i+1][j]) );
+                        RyLayer[i+1][j] = RxLayer[i+1][j] * Layer[i+1][j] * (1 - Layer[i+1][j]);
+                        break;
+                    }
+                    // Default: Activation Function not supported
+                    default: {
+                        printf("[ERROR] AC Function for Layer[%zu] is %c. Unsupported.\n", i+1, AcFunc[i+1]);
+                    }
+                }
+            }
+        }
+
+
+        ///////// Pearlmutter Backward Propagation /////////
+
+        // Gradient Initialisation
+        // Calculating R{} Gradient of KL w.r.t. output values from the final layer, i.e. R{d(KL)/d(mean_i)}
+        for (size_t i=0; i<ActionSpaceDim; ++i) {
+            RGLayer[NumLayers-1][i] = RyLayer[NumLayers-1][i] / Std[i] / Std[i];
+        }
+
+        // Backward Propagation
+        for (size_t i=NumLayers-1; i>0; --i) {
+            
+            size_t CurrLayerSize = LayerSize[i];
+            size_t PrevLayerSize = LayerSize[i-1];
+            size_t j, k;
+
+            // Propagate from Layer[i] to Layer[i-1]
+            #pragma omp parallel for private(j) shared(Layer, RGLayer, RGB) schedule(static)            
+            for (j=0; j<CurrLayerSize; ++j) {
+
+                // Calculating R{} Gradient of KL w.r.t. pre-activated values in Layer[i], i.e. R{d(KL)/d(x_i)}
+                // Differentiate the activation function
+                switch (AcFunc[i]) {
+                    // Linear Activation Function: Ac(x) = (x)
+                    case 'l': {break;}
+                    // tanh() Activation Function: tanh' = 1 - tanh^2
+                    case 't': {RGLayer[i][j] = (1-Layer[i][j]*Layer[i][j])*RGLayer[i][j]; break;}
+                    // 0.1x Activation Function
+                    case 'o': {RGLayer[i][j] = 0.1 * RGLayer[i][j]; break;}
+                    // sigmoid Activation Function: sigmoid' = sigmoid * (1 - sigmoid)
+                    case 's': {RGLayer[i][j] = RGLayer[i][j]*Layer[i][j]*(1-Layer[i][j]); break;}
+                    // Default: Activation Function not supported
+                    default: {
+                        fprintf(stderr, "[ERROR] AC Function for Layer [%zu] is %c. Unsupported.\n", i, AcFunc[i]);
+                    }
+                }
+
+                // The R{} derivative w.r.t to Bias is the same as that w.r.t. the pre-activated value
+                RGB[i-1][j] = RGLayer[i][j];
+            }
+
+            // Calculate the R{} derivative w.r.t. to Weight and the output values from Layer[i]
+            #pragma omp parallel for private(j,k) shared(Layer, RGLayer, W, RGW) schedule(static)
+            for (j=0; j<PrevLayerSize; ++j) {
+                double temp = 0;
+                for (k=0; k<CurrLayerSize; ++k) {
+                    // The R{} Derivative w.r.t. to the weight from Neuron #j in Layer[i-1] to Neuron #k in Layer[i]
+                    RGW[i-1][j*CurrLayerSize+k] = Layer[i-1][j] * RGLayer[i][k];
+                    // Accumulate the Gradient from Neuron #k in Layer[i] to Neuron #j in Layer[i-1]
+                    temp += W[i-1][j*CurrLayerSize+k] * RGLayer[i][k];
+                }
+                RGLayer[i-1][j] = temp;
+            }
+        }
+        
+        // Accumulate the Fisher-Vector Product to z
+        pos = 0;
+        for (size_t i=0; i<NumLayers-1; ++i) {
+            size_t curLayerDim = LayerSize[i];
+            size_t nextLayerDim = LayerSize[i+1];
+            for (size_t j=0; j<curLayerDim;++j) {
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    z[pos] += RGW[i][j*nextLayerDim+k];
+                    pos++;
+                }
+            }
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                z[pos] += RGB[i][k];
+                pos++;
+            }
+        }
+        for (size_t k=0; k<ActionSpaceDim; ++k) {
+            z[pos] += 2 * PGLogStd[k];
+            pos++;
+        }
+            
+    } // End of iteration over current sample
+
+
+    // Averaging Fisher Vector Product over the samples and apply CG Damping
+    #pragma omp parallel for
+    for (size_t i=0; i<pos; ++i) {
+        z[i] = z[i] / (double)NumSamples + CG_Damping * p[i];
+    }    
+    
+    // Now z holds the Fisher Vector Product, x holds stepdir
+    double shs = 0;
+    #pragma omp parallel for reduction (+:shs)
+    for (size_t i=0; i<NumParams; ++i) {
+        shs += z[i] * x[i];
+    }
+    shs = shs * 0.5;
+    
+    // Lagrange Multiplier (lm in Python code)
+    double lm = sqrt(shs / MaxKL);
+    
+    printf("lagrange multiplier: %f\n", lm);   // Optional: Also print gnorm (norm of Policy Gradient g)
+    
+    // Full Step
+    #pragma omp parallel for
+    for (size_t i=0; i<NumParams; ++i) {
+        fullstep[i] = x[i] / lm;
+    }
+    
+    // Inner product of Negative Policy Gradient -g and Step Direction
+    double neggdotstepdir = 0;
+    #pragma omp parallel for reduction (+:neggdotstepdir)
+    for (size_t i=0; i<NumParams; ++i) {
+        neggdotstepdir += b[i] * x[i];
+    }
+
+
+    //////////////////// Line Search ////////////////////
+    
+    // Init theta to x
+    // If Line Search is unsuccessful, theta remains as x
+    for (size_t i=0; i<NumParams; ++i) theta[i] = x[i];
+    
+    // Expected Improve Rate Line Search = slope dy/dx at initial point
+    double expected_improve_rate = neggdotstepdir / lm;
+    
+    // Temporarily Save the Model Parameters in x
+    // The x refers to the x in linesearch function in Python code
+    // Note: Although the name is the same, the x here has nothing to do with the x in Conjugate Gradient
+    
+    // Copy the Model Parameters to x
+    pos = 0;
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        size_t curLayerDim = LayerSize[i];
+        size_t nextLayerDim = LayerSize[i+1];
+        for (size_t j=0; j<curLayerDim;++j) {
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                x[pos] = W[i][j*nextLayerDim+k];
+                pos++;
+            }
+        }
+        for (size_t k=0; k<nextLayerDim; ++k) {
+            x[pos] = B[i][k];
+            pos++;
+        }
+    }
+    for (size_t k=0; k<ActionSpaceDim; ++k) {
+        x[pos] = LogStd[k];
+        pos++;
+    }    
+
+    // Surrogate Loss of the current Model parameters = -Avg(Advantage)
+    double fval = 0;
+    #pragma omp parallel for reduction (+:fval)
+    for (size_t i=0; i<NumSamples; ++i) {
+        fval += Advantage[i];
+    }    
+    fval = -fval / (double) NumSamples;
+
+    printf("fval before %f\n", fval);
+    
+    // Backtracking Line Search
+    for (size_t i=0; i<MaxBackTracks; ++i) {
+    
+        // Step Fraction
+        double stepfrac = pow(0.5, (double)i);
+    
+        // x New
+        #pragma omp parallel for
+        for (size_t i=0; i<NumParams; ++i) {
+            xnew[i] = x[i] + stepfrac * fullstep[i];
+        }
+        
+        ///////// Compute Surrogate Loss /////////
+        
+        // Init W, B, LogStd from xnew
+        pos = 0;
+        for (size_t i=0; i<NumLayers-1; ++i) {
+            size_t curLayerDim  = LayerSize[i];
+            size_t nextLayerDim = LayerSize[i+1];
+            for (size_t j=0; j<curLayerDim;++j) {
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    W[i][j*nextLayerDim+k] = xnew[pos];
+                    pos++;
+                }
+            }
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                B[i][k] = xnew[pos];
+                pos++;
+            }
+        }
+        for (size_t k=0; k<ActionSpaceDim; ++k) {
+            LogStd[k] = xnew[pos];
+            pos++;
+        }
+        
+        // Init Surrogate Loss to 0
+        double surr = 0;
+        
+        for (size_t iter=0; iter<NumSamples; iter++) {
+    
+            ///////// Ordinary Forward Propagation /////////
+    
+            // Assign Input Values
+            for (size_t i=0; i<ObservSpaceDim; ++i) Layer[0][i] = Observ[iter*ObservSpaceDim+i];
+    
+            // Forward Propagation
+            for (size_t i=0; i<NumLayers-1; ++i) {
+            
+                // Propagate from Layer[i] to Layer[i+1]
+                for (size_t j=0; j<LayerSize[i+1]; ++j) {
+                
+                    // Calculating pre-activated value for item[j] in next layer
+                    Layer[i+1][j] = B[i][j];
+                    for (size_t k=0; k<LayerSize[i]; ++k) {
+                        // From Neuron #k in Layer[i] to Neuron #j in Layer[i+1]
+                        Layer[i+1][j] += Layer[i][k] * W[i][k*LayerSize[i+1]+j];
+                    }
+            
+                    // Apply Activation Function
+                    switch (AcFunc[i+1]) {
+                        // Linear Activation Function: Ac(x) = (x)
+                        case 'l': {break;}
+                        // tanh() Activation Function
+                        case 't': {Layer[i+1][j] = tanh(Layer[i+1][j]); break;}
+                        // 0.1x Activation Function
+                        case 'o': {Layer[i+1][j] = 0.1*Layer[i+1][j]; break;}
+                        // sigmoid Activation Function
+                        case 's': {Layer[i+1][j] = 1.0/(1+exp(-Layer[i+1][j])); break;}
+                        // Default: Activation Function not supported
+                        default: {
+                            printf("[ERROR] Activation Function for Layer [%zu] is %c. Unsupported.\n", i+1, AcFunc[i+1]);
+                            return -1;
+                        }
+                    }
+                }
+            }
+
+            // Surrogate Loss Calculation
+
+            // LoglikelihoodDifference = logp_i - oldlogp_i
+            // Here, logp_i is derived from xnew, oldlogp_i is derived from x (Mean in the simulation data)
+            double LoglikelihoodDifference = 0;
+            for (size_t i=0; i<ActionSpaceDim; ++i) {
+                double temp_x    = (Action[iter*ActionSpaceDim+i] - Mean[iter*ActionSpaceDim+i]) / Std[i];
+                double temp_xnew = (Action[iter*ActionSpaceDim+i] - Layer[NumLayers-1][i]) / exp(LogStd[i]);
+                LoglikelihoodDifference += temp_x*temp_x - temp_xnew*temp_xnew + log(Std[i]) - LogStd[i];
+            }
+            LoglikelihoodDifference = LoglikelihoodDifference * 0.5;
+            
+            // Accumulate Surrogate Loss
+            surr += exp(LoglikelihoodDifference) * Advantage[iter];
+      
+        }
+        
+        // Average Surrogate Loss over the samples to get newfval
+        double newfval = -surr / (double) NumSamples;
+        
+        // Improvement in terms of Surrogate Loss
+        double actual_improve = fval - newfval;
+        
+        // Expected Improvement
+        double expected_improve = expected_improve_rate * stepfrac;
+        
+        // Improvement Ratio
+        double ratio = actual_improve / expected_improve;
+        
+        printf("a/e/r %f / %f / %f\n", actual_improve, expected_improve, ratio);
+        
+        // Check breaking condition - has Line Search succeeded?
+        if ( (ratio > AcceptRatio) && (actual_improve > 0) ) {
+            // If Line Search is successful, update parameters and quit
+            for (size_t i=0; i<NumParams; ++i) theta[i] = xnew[i];
+            break;
+        }
+    
+    }   // End of Line Search
+    
+    // Copy theta to Result
+    // Note that these are the updated Model parameters
+    for (size_t i=0; i<NumParams; ++i) Result[i] = theta[i];
 
     gettimeofday(&tv2, NULL);
     double runtimeS = ((tv2.tv_sec-tv1.tv_sec) * (double)1E6 + (tv2.tv_usec-tv1.tv_usec)) / (double)1E6;
@@ -648,6 +1040,9 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
 
     // Conjugate Gradient
     free(b); free(p); free(r); free(x); free(z);
+
+    // Line Search
+    free(fullstep); free(xnew); free(theta);
 
     return runtimeS;
 
