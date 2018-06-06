@@ -628,12 +628,11 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
 
     }
 
-    // Now x is the Step Direction of the line search (stepdir in the Python code)
 
     // Calculate another Fisher Vector Product - code reuse opportunity
     
     ///////// Fisher Vector Product Computation z = FVP(x) /////////
-        
+    
     // Init PGW, PGB, PGLogStd from x
     // Init z to 0
     pos = 0;
@@ -808,8 +807,8 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
     // Averaging Fisher Vector Product over the samples and apply CG Damping
     #pragma omp parallel for
     for (size_t i=0; i<pos; ++i) {
-        z[i] = z[i] / (double)NumSamples + CG_Damping * p[i];
-    }    
+        z[i] = z[i] / (double)NumSamples + CG_Damping * x[i];
+    }
     
     // Now z holds the Fisher Vector Product, x holds stepdir
     double shs = 0;
@@ -818,11 +817,20 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
         shs += z[i] * x[i];
     }
     shs = shs * 0.5;
+    printf("shs: %.14f\n", shs);
+    
     
     // Lagrange Multiplier (lm in Python code)
     double lm = sqrt(shs / MaxKL);
     
-    printf("lagrange multiplier: %f\n", lm);   // Optional: Also print gnorm (norm of Policy Gradient g)
+    // Compute the 2-norm of the Policy Gradient
+    double gnorm = 0;
+    for (size_t i=0; i<NumParams; ++i) {
+        gnorm += b[i] * b[i];
+    }
+    gnorm = sqrt(gnorm);
+    
+    printf("lagrange multiplier: %.14f, gnorm: %.14f\n", lm, gnorm);
     
     // Full Step
     #pragma omp parallel for
@@ -880,7 +888,7 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
     }    
     fval = -fval / (double) NumSamples;
 
-    printf("fval before %f\n", fval);
+    printf("fval before %.14e\n", fval);
     
     // Backtracking Line Search
     for (size_t i=0; i<MaxBackTracks; ++i) {
@@ -988,7 +996,7 @@ double TRPO(TRPOparam param, double *Result, size_t NumThreads) {
         // Improvement Ratio
         double ratio = actual_improve / expected_improve;
         
-        printf("a/e/r %f / %f / %f\n", actual_improve, expected_improve, ratio);
+        printf("a/e/r %.14f / %.14f / %.14f\n", actual_improve, expected_improve, ratio);
         
         // Check breaking condition - has Line Search succeeded?
         if ( (ratio > AcceptRatio) && (actual_improve > 0) ) {

@@ -316,9 +316,9 @@ void Test_TRPO(size_t NumThreads)
     char AcFunc [] = {'l', 't', 't', 'l'};
     size_t LayerSize [] = {15, 16, 16, 3};
 
-    char * ModelFileName = "ArmTestModel.txt";
-    char * DataFileName  = "ArmTestData.txt";
-    char * CGFileName    = "ArmTestCG.txt";
+    char * ModelFileName  = "ArmTestModel.txt";
+    char * DataFileName   = "ArmTestData.txt";
+    char * ResultFileName = "ArmTestModelUpdated.txt";
 
     TRPOparam Param;
     Param.ModelFile  = ModelFileName;
@@ -329,22 +329,21 @@ void Test_TRPO(size_t NumThreads)
     Param.NumSamples = 2400;
     Param.CG_Damping = 0.1;
 
-    // Open Simulation Data File that contains test data
-    FILE *DataFilePointer = fopen(CGFileName, "r");
+    // Open Data File that contains updated Model Parameters
+    FILE *DataFilePointer = fopen(ResultFileName, "r");
     if (DataFilePointer==NULL) {
-        fprintf(stderr, "[ERROR] Cannot open Data File [%s]. \n", CGFileName);
+        fprintf(stderr, "[ERROR] Cannot open Data File [%s]. \n", ResultFileName);
         return;
     }
 
     // Memory Allocation
     size_t NumParams = NumParamsCalc(Param.LayerSize, Param.NumLayers);
-    double * input   = (double *) calloc(NumParams, sizeof(double));
     double * result  = (double *) calloc(NumParams, sizeof(double));
     double * expect  = (double *) calloc(NumParams, sizeof(double)); 
     
     // Read Input and Expect
     for (size_t i=0; i<NumParams; ++i) {
-         fscanf(DataFilePointer, "%lf %lf", &input[i], &expect[i]);
+         fscanf(DataFilePointer, "%lf", &expect[i]);
     }
     fclose(DataFilePointer);
     
@@ -357,7 +356,7 @@ void Test_TRPO(size_t NumThreads)
     for (size_t i=0; i<NumParams; ++i) {        
         double cur_err = fabs( (result[i]-expect[i])/expect[i] ) * 100;
     	if (expect[i] != 0) percentage_err += cur_err;
-    	//if (cur_err>1) printf("Actual[%zu]=%e, Expect=%e. %.4f%% Difference\n", i, result[i], expect[i], cur_err);
+    	if (cur_err>1) printf("Actual[%zu]=%e, Expect=%e. %.4f%% Difference\n", i, result[i], expect[i], cur_err);
     }
     percentage_err = percentage_err / (double)NumParams;
     printf("\n[INFO] CPU Computing Time = %f seconds\n", compTime);
@@ -365,7 +364,7 @@ void Test_TRPO(size_t NumThreads)
     printf("---------------------------------------------------------------------\n\n");
 
     // Clean Up    
-    free(input); free(result); free(expect);
+    free(result); free(expect);
     
     return;
 }
