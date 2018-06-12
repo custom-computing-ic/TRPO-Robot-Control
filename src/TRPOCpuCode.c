@@ -309,7 +309,7 @@ void Test_CG_FPGA(size_t NumThreads)
 }
 
 
-void Test_TRPO(size_t NumThreads)
+void Test_TRPO_Update(size_t NumThreads)
 {
 	
     // ArmDOF_0-v0
@@ -348,7 +348,7 @@ void Test_TRPO(size_t NumThreads)
     fclose(DataFilePointer);
     
     printf("----------------------- TRPO Update Test (%zu Threads) ------------------------\n", NumThreads);
-    double compTime = TRPO(Param, result, NumThreads);
+    double compTime = TRPO_Update(Param, result, NumThreads);
     if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
 
     // Check Result
@@ -378,7 +378,7 @@ int main()
     
 //    Test_FVP(6);
 //    Test_CG(6);
-    Test_TRPO(6);
+    Test_TRPO_Update(6);
 
     //////////////////// FPGA ////////////////////
 
