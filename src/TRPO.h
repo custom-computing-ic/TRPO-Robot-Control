@@ -42,6 +42,34 @@ typedef struct {
     
 } TRPOparam;
 
+typedef struct {
+
+    // Paramaters
+    size_t NumLayers;
+    size_t ObservSpaceDim;
+    size_t NumEpBatch;
+    size_t EpLen;
+    size_t NumSamples;
+    size_t NumParams;
+    int PaddedParams;
+    char * AcFunc;
+    
+    // For Forward Propagation and Back Propagation
+    size_t * LayerSizeBase;
+    double ** WBase;
+    double ** BBase;
+    double ** LayerBase;
+    double ** GWBase;
+    double ** GBBase;
+    double ** GLayerBase;
+    
+    // Training Data
+    double * Observ;
+    double * Target;    // The prediction target
+    double * Predict;   // The prediction
+
+} TRPOBaselineParam;
+
 
 // Utility function calculating the number of trainable parameters
 size_t NumParamsCalc (size_t * LayerSize, size_t NumLayers);
@@ -67,9 +95,7 @@ double FVP_FPGA(TRPOparam param, double *Result, double *Input);
 double CG_FPGA(TRPOparam param, double *Result, double *b, size_t MaxIter, double ResidualTh, size_t NumThreads);
 
 // TRPO All-In-One on CPU
-double TRPO(TRPOparam param, double *Result, size_t NumThreads);
-
-
+double TRPO_Update(TRPOparam param, double *Result, size_t NumThreads);
 
 
 #endif

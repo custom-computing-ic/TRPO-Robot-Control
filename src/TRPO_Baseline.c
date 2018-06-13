@@ -9,8 +9,6 @@
 #include "lbfgs.h"
 
 
-
-
 /**
  * Callback interface to provide objective function and gradient evaluations.
  *
@@ -28,12 +26,15 @@
  *  @retval lbfgsfloatval_t The value of the objective function for the current
  *                          variables.
  */
-static lbfgsfloatval_t evaluate(void *param, const lbfgsfloatval_t *x, lbfgsfloatval_t *g, const int n, const lbfgsfloatval_t step) {
+lbfgsfloatval_t evaluate(void *param_in, const lbfgsfloatval_t *x, lbfgsfloatval_t *g, const int n, const lbfgsfloatval_t step) {
 
     // Note that the number of parameters in this implementation must be a multiple of 16
     // Thus there are some padding zeros in the end
 
     /////////// Parameters and Pointers ///////////
+
+    // Cast void* to TRPOBaselineParam*
+    TRPOBaselineParam* param = (TRPOBaselineParam*) param_in;
 
     // Read Paramaters and Memory Addresses from param
     const size_t NumLayers      = param -> NumLayers;
@@ -42,6 +43,7 @@ static lbfgsfloatval_t evaluate(void *param, const lbfgsfloatval_t *x, lbfgsfloa
     const size_t EpLen          = param -> EpLen;
     const size_t NumSamples     = param -> NumSamples;
     const size_t NumParams      = param -> NumParams;
+    char * AcFunc               = param -> AcFunc;
     
     // For Forward Propagation and Back Propagation
     size_t * LayerSizeBase      = param -> LayerSizeBase;
@@ -54,8 +56,8 @@ static lbfgsfloatval_t evaluate(void *param, const lbfgsfloatval_t *x, lbfgsfloa
     
     // Training Data
     double * Observ             = param -> Observ;
-    double * Target             = param -> Return;    // The prediction target
-    double * Predict            = param -> Predict;   // The prediction
+    double * Target             = param -> Target;
+    double * Predict            = param -> Predict;
 
 
     /////////// Initialisation ///////////
@@ -74,7 +76,7 @@ static lbfgsfloatval_t evaluate(void *param, const lbfgsfloatval_t *x, lbfgsfloa
             }
         }
         for (size_t k=0; k<nextLayerDim; ++k) {
-            BBase[i][k] = Input[pos];
+            BBase[i][k] = x[pos];
             g[pos] = 0;
             pos++;
         }
@@ -258,7 +260,7 @@ static lbfgsfloatval_t evaluate(void *param, const lbfgsfloatval_t *x, lbfgsfloa
  *  @retval int         Zero to continue the optimization process. Returning a
  *                      non-zero value will cancel the optimization process.
  */
-static int progress( void *instance, const lbfgsfloatval_t *x, const lbfgsfloatval_t *g, const lbfgsfloatval_t fx, const lbfgsfloatval_t xnorm, const lbfgsfloatval_t gnorm, const lbfgsfloatval_t step, int n, int k, int ls) {
+int progress( void *instance, const lbfgsfloatval_t *x, const lbfgsfloatval_t *g, const lbfgsfloatval_t fx, const lbfgsfloatval_t xnorm, const lbfgsfloatval_t gnorm, const lbfgsfloatval_t step, int n, int k, int ls) {
 
     printf("[INFO] Baseline Update Iter %2d: Loss = %f, xnorm = %f, gnorm = %f, step = %f\n", k, fx, xnorm, gnorm, step);
     
