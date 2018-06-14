@@ -47,8 +47,8 @@
 
     <!-- Actuators define which joints can be moved with an action. The number of actuators also define the size of the action space. -->
 	<actuator>
-        <motor ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint="j0" /> 
-	    <motor ctrllimited="true" gear="0.01" joint='j1' ctrlrange="-1 1"/>
-        <motor ctrllimited="true" gear="0.01" joint='j2' ctrlrange="-1 1"/>
-    </actuator>
+            <motor name="M0" ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint="j0" />
+	    <motor name="M1" ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint='j1' />
+            <motor name="M2" ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint='j2' />
+        </actuator>
 </mujoco>

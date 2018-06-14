@@ -375,10 +375,10 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     
     printf("[INFO] ID: DOF1 DOF2 wrist grip object = %d %d %d %d %d\n", DOF1, DOF2, wrist, grip, object);
     
-    // Action Space: Get ID of "j0" "j1" "j2"
-    const int j0 = mj_name2id(m, mjOBJ_ACTUATOR, "j0");
-    const int j1 = mj_name2id(m, mjOBJ_ACTUATOR, "j1");
-    const int j2 = mj_name2id(m, mjOBJ_ACTUATOR, "j2");
+    // Action Space: Get ID of "M0" "M1" "M2"
+    const int j0 = mj_name2id(m, mjOBJ_ACTUATOR, "M0");
+    const int j1 = mj_name2id(m, mjOBJ_ACTUATOR, "M1");
+    const int j2 = mj_name2id(m, mjOBJ_ACTUATOR, "M2");
     
     printf("[INFO] ID: J0 J1 J2 = %d %d %d\n", j0, j1, j2);
 
@@ -408,12 +408,6 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
             d->qpos[nq-3] = target_x;
             d->qpos[nq-2] = target_y;
             d->qpos[nq-1] = target_z;
-            
-            // Check qpos and qvel
-            for (int i=0; i<m->nq; ++i) printf("%f ", d->qpos[i]);
-            printf("\n");
-            for (int i=0; i<m->nv; ++i) printf("%f ", d->qvel[i]);
-            printf("\n");
             
             
             ///////// Rollout Several Time Steps in Each Episode /////////
