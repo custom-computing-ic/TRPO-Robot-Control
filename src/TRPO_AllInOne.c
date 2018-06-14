@@ -352,8 +352,8 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
 
     // L-BFGS Optimisation for Baseline Fitting
     lbfgs_parameter_t LBFGS_Param;
-    LBFGS_Param.max_iterations = 25;
     lbfgs_parameter_init(&LBFGS_Param);
+    LBFGS_Param.max_iterations = 25;
 
 
     ///////// Init MuJoCo /////////
@@ -626,7 +626,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
             for (int currentStep=0; currentStep<EpLen-1; ++currentStep) {
                 Reward[ep*EpLen+currentStep] += gamma * Baseline[ep*EpLen+currentStep+1] - Baseline[ep*EpLen+currentStep];
             }
-            Reward[ep*EpLen+EpLen-1] += (gamma-1) * Baseline[ep*EpLen+EpLen-1];
+            Reward[ep*EpLen+EpLen-1] += (-1) * Baseline[ep*EpLen+EpLen-1];
             
             // Calculate the Advantage of this episode
             for (int currentStep=0; currentStep<EpLen; ++currentStep) {
@@ -647,7 +647,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
         
         double AdvantageStd = 0;
         for (int i=0; i<NumSamples; ++i) AdvantageStd += (Advantage[i] - AdvantageMean)*(Advantage[i] - AdvantageMean);
-        AdvantageStd = AdvantageStd / (double) (NumSamples-1);
+        AdvantageStd = sqrt(AdvantageStd / (double) (NumSamples));
         
         for (int i=0; i<NumSamples; ++i) Advantage[i] = (Advantage[i] - AdvantageMean) / AdvantageStd;
         
