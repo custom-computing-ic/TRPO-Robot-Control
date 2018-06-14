@@ -68,7 +68,7 @@ ifneq ($(findstring cpp, $(CPUFILES)), )
 else
     # language: C
     # CC ?= icc
-    CC = g++
+    CC = icc
     CPUCOMPILER = $(CC)
 
     # Assuming CC points to gcc/cc by default

@@ -370,6 +370,39 @@ void Test_TRPO_Update(size_t NumThreads)
 }
 
 
+void Test_TRPO_RunTraining(size_t NumThreads)
+{
+	
+    // ArmDOF_0-v0
+    int NumIterations = 2;
+    char AcFunc [] = {'l', 't', 't', 'l'};
+    size_t LayerSize [] = {15, 16, 16, 3};
+
+    char * ModelFileName    = "ArmTestModel.txt";
+    char * BaselineFileName = "ArmTestBaseline.txt";
+
+    TRPOparam Param;
+    Param.ModelFile    = ModelFileName;
+    Param.BaselineFile = BaselineFileName;
+    Param.NumLayers    = 4;
+    Param.AcFunc       = AcFunc;
+    Param.LayerSize    = LayerSize;
+    Param.NumSamples   = 2400;
+    Param.CG_Damping   = 0.1;
+
+    
+    printf("----------------------- Run Training Test (%zu Threads) ------------------------\n", NumThreads);
+    double compTime = RunTraining(Param, NumIterations, NumThreads);
+    if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
+
+    // Check Result
+    printf("\n[INFO] CPU Computing Time = %f seconds\n", compTime);
+    printf("---------------------------------------------------------------------\n\n");
+    
+    return;
+}
+
+
 
 int main()
 {

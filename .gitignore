@@ -17,6 +17,8 @@ TRPO_*/
 report/
 build/TRPO_*
 
+# data folder
+data/
 
 # git unignore setting
 !LICENSE.txt

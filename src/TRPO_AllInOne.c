@@ -24,7 +24,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     size_t * LayerSize      = param.LayerSize;
     const size_t NumSamples = param.NumSamples;
     char * ModelFile        = param.ModelFile;
-    char * DataFile         = param.DataFile;
+    char * BaselineFile     = param.BaselineFile;
     const double CG_Damping = param.CG_Damping;
     double ResidualTh       = 1e-10;
     size_t MaxIter          = 10;
@@ -312,6 +312,38 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     fclose(ModelFilePointer);
 
 
+    //////////////////// Initialisation - Baseline ////////////////////
+    
+    // Note: Here we just initialise the Neural Network from a Datafile
+    //       which is the initialisation given by the Python ML Libraries.
+    //       We can also initialise the Neural Network ourselves
+    // Open Model File that contains Weights, Bias and std
+    FILE *BaselineFilePointer = fopen(BaselineFile, "r");
+    if (BaselineFilePointer==NULL) {
+        fprintf(stderr, "[ERROR] Cannot open BaselineFile [%s]. \n", BaselineFile);
+        return -1;
+    }
+    
+    // Read Weights and Bias from file
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        // Reading Weights W[i]: from Layer[i] to Layer[i+1]
+        size_t curLayerDim  = LayerSizeBase[i];
+        size_t nextLayerDim = LayerSizeBase[i+1];
+        for (size_t j=0; j<curLayerDim;++j) {
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                fscanf(BaselineFilePointer, "%lf", &WBase[i][j*nextLayerDim+k]);
+            }
+        }
+        // Reading Bias B[i]: from Layer[i] to Layer[i+1]
+        for (size_t k=0; k<nextLayerDim; ++k) {
+            fscanf(BaselineFilePointer, "%lf", &BBase[i][k]);
+        }
+    }
+
+    // Close Baseline Model File
+    fclose(BaselineFilePointer);
+
+
     //////////////////// Initialisation - Advantage ////////////////////
 
     // Init Z-Filter count
@@ -319,8 +351,8 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     int rwFilterCount = 0;
 
     // L-BFGS Optimisation for Baseline Fitting
-    // TODO Set Param values
     lbfgs_parameter_t LBFGS_Param;
+    LBFGS_Param.max_iterations = 25;
     lbfgs_parameter_init(&LBFGS_Param);
 
 

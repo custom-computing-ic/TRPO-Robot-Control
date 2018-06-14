@@ -9,6 +9,9 @@ typedef struct {
 
     // Model Parameter File Name - weight, bias, std.
     char * ModelFile;
+
+    // Baseline File Name - weight, bias, std.
+    char * BaselineFile;    
     
     // Simulation Data File Name - probability and observation
     char * DataFile;
@@ -94,8 +97,10 @@ double FVP_FPGA(TRPOparam param, double *Result, double *Input);
 // CG Computation on FPGA
 double CG_FPGA(TRPOparam param, double *Result, double *b, size_t MaxIter, double ResidualTh, size_t NumThreads);
 
-// TRPO All-In-One on CPU
+// TRPO Update on CPU
 double TRPO_Update(TRPOparam param, double *Result, size_t NumThreads);
 
+// TRPO All-In-One
+double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads);
 
 #endif
