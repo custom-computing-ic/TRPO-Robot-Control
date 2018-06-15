@@ -376,11 +376,11 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     printf("[INFO] ID: DOF1 DOF2 wrist grip object = %d %d %d %d %d\n", DOF1, DOF2, wrist, grip, object);
     
     // Action Space: Get ID of "M0" "M1" "M2"
-    const int j0 = mj_name2id(m, mjOBJ_ACTUATOR, "M0");
-    const int j1 = mj_name2id(m, mjOBJ_ACTUATOR, "M1");
-    const int j2 = mj_name2id(m, mjOBJ_ACTUATOR, "M2");
+    const int M0 = mj_name2id(m, mjOBJ_ACTUATOR, "M0");
+    const int M1 = mj_name2id(m, mjOBJ_ACTUATOR, "M1");
+    const int M2 = mj_name2id(m, mjOBJ_ACTUATOR, "M2");
     
-    printf("[INFO] ID: J0 J1 J2 = %d %d %d\n", j0, j1, j2);
+    printf("[INFO] ID: M0 M1 M2 = %d %d %d\n", M0, M1, M2);
 
 
     //////////////////// Main Loop ////////////////////
@@ -517,9 +517,9 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 ///////// Physical Simulation /////////
                 
                 // Send action to mjData
-                d->ctrl[j0] = ac[0];
-                d->ctrl[j1] = ac[1];
-                d->ctrl[j2] = ac[2];                
+                d->ctrl[M0] = ac[0];
+                d->ctrl[M1] = ac[1];
+                d->ctrl[M2] = ac[2];                
                 
                 // Run MuJoCo Simulation
                 mjtNum simStart = d->time;
@@ -1432,7 +1432,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
             }
         }
         for (size_t k=0; k<ActionSpaceDim; ++k) {
-            LogStd[k] = x[pos];
+            LogStd[k] = theta[pos];
             pos++;
         }
 
