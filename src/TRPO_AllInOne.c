@@ -25,6 +25,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     const size_t NumSamples = param.NumSamples;
     char * ModelFile        = param.ModelFile;
     char * BaselineFile     = param.BaselineFile;
+    char * ResultFile       = param.ResultFile;
     const double CG_Damping = param.CG_Damping;
     double ResidualTh       = 1e-10;
     size_t MaxIter          = 10;
@@ -1442,6 +1443,40 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     // Toc
     gettimeofday(&tv2, NULL);
     double runtimeS = ((tv2.tv_sec-tv1.tv_sec) * (double)1E6 + (tv2.tv_usec-tv1.tv_usec)) / (double)1E6;
+
+
+    //////////////////// Save Training Result ////////////////////
+    
+    // Open Result File to write Weights, Bias and LogStd
+    FILE *ResultFilePointer = fopen(ResultFile, "w");
+    if (ResultFilePointer==NULL) {
+        fprintf(stderr, "[ERROR] Cannot open Result File [%s]. \n", ResultFile);
+        return -1;
+    }
+    
+    // Write Weights and Bias to file
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        // Weights W[i]: from Layer[i] to Layer[i+1]
+        size_t curLayerDim  = LayerSize[i];
+        size_t nextLayerDim = LayerSize[i+1];
+        for (size_t j=0; j<curLayerDim;++j) {
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                fprintf(ResultFilePointer, "%.14f\n", W[i][j*nextLayerDim+k]);
+            }
+        }
+        // Bias B[i]: from Layer[i] to Layer[i+1]
+        for (size_t k=0; k<nextLayerDim; ++k) {
+            fprintf(ResultFilePointer, "%.14f\n", B[i][k]);
+        }
+    }
+
+    // LogStd
+    for (size_t k=0; k<ActionSpaceDim; ++k) {
+        fprintf(ResultFilePointer, "%.14f\n", LogStd[k]);
+    }
+
+    // Close Result File
+    fclose(ResultFilePointer);
 
 
     //////////////////// Clean Up ////////////////////

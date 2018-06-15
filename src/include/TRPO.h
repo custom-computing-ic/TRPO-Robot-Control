@@ -7,11 +7,14 @@ typedef struct {
 
     //////////////////// For CPU and FPGA ////////////////////
 
-    // Model Parameter File Name - weight, bias, std.
+    // Model Parameter File Name - Weight, Bias, LogStd.
     char * ModelFile;
 
-    // Baseline File Name - weight, bias, std.
-    char * BaselineFile;    
+    // Baseline File Name - weight, bias
+    char * BaselineFile;
+    
+    // Result File Name - trained Weight, Bias, LogStd
+    char * ResultFile;
     
     // Simulation Data File Name - probability and observation
     char * DataFile;
