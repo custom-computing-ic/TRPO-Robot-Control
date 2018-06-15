@@ -383,6 +383,7 @@ void Test_TRPO_RunTraining(const int NumIterations, const size_t NumThreads){
     TRPOparam Param;
     Param.ModelFile    = ModelFileName;
     Param.BaselineFile = BaselineFileName;
+    Param.ResultFile   = ResultFileName;
     Param.NumLayers    = 4;
     Param.AcFunc       = AcFunc;
     Param.LayerSize    = LayerSize;

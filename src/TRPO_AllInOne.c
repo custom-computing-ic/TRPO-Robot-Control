@@ -420,12 +420,12 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 
                 // Get Raw Observation Vector: DOF1 DOF2 wrist grip object
                 int ob_pos = 0;
-                for (int i=DOF1;   i<DOF1+3;   ++i) ob[ob_pos++] = d->xpos[i];
-                for (int i=DOF2;   i<DOF2+3;   ++i) ob[ob_pos++] = d->xpos[i];
-                for (int i=wrist;  i<wrist+3;  ++i) ob[ob_pos++] = d->xpos[i];
-                for (int i=grip;   i<grip+3;   ++i) ob[ob_pos++] = d->xpos[i];
-                for (int i=object; i<object+3; ++i) ob[ob_pos++] = d->xpos[i];
-                
+                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*DOF1+i];
+                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*DOF2+i];
+                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*wrist+i];
+                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*grip+i];
+                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*object+i];
+
                 // Filter Observation Space: Z-Filter
                 // Update Filter
                 obFilterCount++;
@@ -518,9 +518,9 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 ///////// Physical Simulation /////////
                 
                 // Send action to mjData
-                d->ctrl[M0] = ac[0];
-                d->ctrl[M1] = ac[1];
-                d->ctrl[M2] = ac[2];                
+                d->ctrl[M0] = (ac[0] > 1) ? 1 : ((ac[0]<-1) ? -1 : ac[0]);
+                d->ctrl[M1] = (ac[1] > 1) ? 1 : ((ac[1]<-1) ? -1 : ac[1]);
+                d->ctrl[M2] = (ac[2] > 1) ? 1 : ((ac[2]<-1) ? -1 : ac[2]);
                 
                 // Run MuJoCo Simulation
                 mjtNum simStart = d->time;
@@ -530,8 +530,8 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 ///////// Calculate Reward /////////
           
                 // Get Position of the Grip and the Object
-                double   gripPos[3] = {d->xpos[grip], d->xpos[grip+1], d->xpos[grip+2]};
-                double objectPos[3] = {d->xpos[object], d->xpos[object+1], d->xpos[object+2]};
+                double   gripPos[3] = {d->xpos[3*grip], d->xpos[3*grip+1], d->xpos[3*grip+2]};
+                double objectPos[3] = {d->xpos[3*object], d->xpos[3*object+1], d->xpos[3*object+2]};
                 
                 // Reward Function  TODO Modify Reward Function with -Eculidean Distance - Action Norm?
                 double re = 0;
