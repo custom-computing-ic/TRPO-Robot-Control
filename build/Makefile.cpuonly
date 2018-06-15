@@ -1,0 +1,16 @@
+####################################################
+#       Makefile ------- Patrick 2018              #
+####################################################
+
+CFLAGS= -O3 -march=native -std=c++11 -fopenmp -I../src/include
+LFLAGS= ../src/bin/libmujoco131.so ../src/bin/libglfw.so.3 -lm -lpthread -fPIC
+
+CPUFILES= ../src/TRPO_AllInOne.c ../src/TRPO_Util.c ../src/TRPOCpuCode.c ../src/lbfgs.c ../src/TRPO_Baseline.c
+
+build:
+	g++ $(CFLAGS) $(CPUFILES) $(LFLAGS) -o TRPO
+run:
+	./TRPO
+clean:
+	rm TRPO
+

@@ -136,7 +136,7 @@ lbfgsfloatval_t evaluate(void *param_in, const lbfgsfloatval_t *x, lbfgsfloatval
             /////////// Back Propagation ///////////
 
             // Gradient Initialisation - just MSE
-            GLayerBase[NumLayers-1][0] = 2*(Predict[pos]-Target[pos]);   
+            GLayerBase[NumLayers-1][0] = 0.02 * (Predict[pos]-Target[pos]);   
 
             // Backward Propagation
             for (size_t i=NumLayers-1; i>0; --i) {
@@ -223,7 +223,7 @@ lbfgsfloatval_t evaluate(void *param_in, const lbfgsfloatval_t *x, lbfgsfloatval
     // Calculate Objective Function Value - MSE
     double mse = 0;
     for (size_t i=0; i<NumSamples; ++i) {
-        mse += (Predict[i] - Target[i]) * (Predict[i] - Target[i]);
+        mse += 0.01 * (Predict[i] - Target[i]) * (Predict[i] - Target[i]);
     }
     mse = mse / (double) NumSamples;
 
@@ -234,7 +234,7 @@ lbfgsfloatval_t evaluate(void *param_in, const lbfgsfloatval_t *x, lbfgsfloatval
     }
     
     // Calculate Objective Function Value
-    lbfgsfloatval_t ObjValue = mse + 1e-3 * L2;
+    lbfgsfloatval_t ObjValue = mse + 0.001 * L2;
 
     return ObjValue;
 }

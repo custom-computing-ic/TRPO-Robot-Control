@@ -1,0 +1,54 @@
+<mujoco model="armDOF_0">
+	<compiler angle="degree" coordinate="local" inertiafromgeom="true" />
+	<default>
+        <joint axis="0 1 0" type="hinge" />
+	</default>
+	<option gravity="0 0 0" integrator="RK4" timestep="0.02" />
+	<size nstack="3000" />
+	<worldbody>
+        <!-- Definition of the model arm as a body in the world of the simulation. The different bodies that make up the arm must be encapsulated so that the physics of
+            one affects the others. Bodies must be named in order that their coordinates may be extracted in the environment. -->
+            <body name="base" pos="0 0 -0.00882">
+                <geom density="5000" pos="0 0 0.00882" rgba=".2 .2 .5 1" size="0.01 0.01 0.00882" type="box"/>
+                <joint axis="0 0 1" name="j0" pos="0 0 0.00882" range="-50 50" damping="0.001"/>
+
+                <body name="DOF1" pos="0 0 0.0265">
+                    <geom pos="0 0 0.02875" size="0.005 0.005 0.02875" type="box"/>
+                    <geom fromto="0 0.01 0  0 -0.01 0" name="g1" rgba=".3 .9 .3 .4" size="0.005" type="cylinder"/>
+                    <joint name='j1' pos="0 0 0" range="-50 50" damping="0.001" /> 
+
+                    <body name="DOF2" pos="0 0 0.0575">
+                        <geom fromto="0 0 0  0.07375 0 0" size="0.005" type="capsule" /> 
+                        <!--<geom pos="0.036875 0 0" size="0.036875 0.002 0.002" type="box"/> -->
+                        <geom fromto="0 0.01 0  0 -0.01 0" name="g2" rgba=".3 .9 .3 .4" size="0.005" type="cylinder"/>
+                        <joint name='j2' pos="0 0 0" range="-50 50" damping="0.001"/>
+
+                        <body name="wrist" pos="0.07375 0 0">
+                        <geom fromto="0 0 0  0.0394 0 0" size="0.005" type="capsule" /> 
+                            <!--<geom pos="0.0197 0 0" size="0.0197 0.002 0.002" type="box"/> -->
+                        <geom fromto="0 0.01 0  0 -0.01 0" name="g3" rgba=".3 .9 .3 .4" size="0.005" type="cylinder"/>
+
+                            <body name="grip" pos="0.0394 0 -0.0125">
+                                <geom fromto="0 0.002 0 0 -0.002 0" rgba=".3 .9 .3 .4" size="0.001" type="cylinder" />
+                            </body>
+                        </body>
+                    </body>
+                </body>
+            </body>
+        <!-- Definition of the object as a body in the world of the simulation. The joints are sliders so that the object can appear anywhere in a defined box. --> 
+        <body name="object" pos="0.11315 0 0.084">
+            <joint armature="0" axis="1 0 0" damping="0" limited="true" name="target_x" pos="0 0 0" range=".084 .16" ref="0.11315" stiffness="0" type="slide"/>
+            <joint armature="0" axis="0 1 0" damping="0" limited="true" name="target_y" pos="0 0 0" range="-.05 .05" ref="0" stiffness="0" type="slide"/>
+            <joint armature="0" axis="0 0 1" damping="0" limited="true" name="target_z" pos="0 0 0" range="0 0.1" ref="0.084" stiffness="0" type="slide"/>
+            <geom conaffinity="0" contype="0" name="target" pos="0 0 0" rgba="0.9 0.2 0.2 1" size=".009" type="sphere"/>
+        </body>
+       
+	</worldbody>
+
+    <!-- Actuators define which joints can be moved with an action. The number of actuators also define the size of the action space. -->
+	<actuator>
+            <motor name="M0" ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint="j0" />
+	    <motor name="M1" ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint='j1' />
+            <motor name="M2" ctrllimited="true" ctrlrange="-1 1" gear="0.01" joint='j2' />
+        </actuator>
+</mujoco>
