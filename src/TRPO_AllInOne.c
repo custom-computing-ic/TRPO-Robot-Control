@@ -655,7 +655,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
         
         ///////// Baseline Update /////////  TODO: Can be executed concurrently with TRPO Update
 
-        // Write weights to LBFGS_x
+        // Write Weight and Bias of the Baseline to LBFGS_x
         pos = 0;
         for (size_t i=0; i<NumLayers-1; ++i) {
             size_t curLayerDim = LayerSizeBase[i];
@@ -670,9 +670,10 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 LBFGS_x[pos] = BBase[i][k];
                 pos++;
             }
-        }      
+        }
         
-        int LBFGSStatus = lbfgs(BaselineParam.PaddedParams, LBFGS_x, &LBFGS_fx, evaluate, progress, &BaselineParam, &LBFGS_Param);
+        // Run L-BFGS Algorithm to optimise the Baseline
+        lbfgs(BaselineParam.PaddedParams, LBFGS_x, &LBFGS_fx, evaluate, NULL, &BaselineParam, &LBFGS_Param);
 
   
         //////////////////// TRPO Update ////////////////////

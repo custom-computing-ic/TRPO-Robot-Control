@@ -6,9 +6,10 @@
 #include "omp.h"
 
 #include "TRPO.h"
+
+/*
 #include "Maxfiles.h"
 #include "MaxSLiCInterface.h"
-
 
 void Test_FVP(size_t NumThreads)
 {
@@ -368,18 +369,16 @@ void Test_TRPO_Update(size_t NumThreads)
     
     return;
 }
+*/
 
-
-void Test_TRPO_RunTraining(size_t NumThreads)
-{
+void Test_TRPO_RunTraining(const int NumIterations, const size_t NumThreads){
 	
     // ArmDOF_0-v0
-    int NumIterations = 2;
-    char AcFunc [] = {'l', 't', 't', 'l'};
-    size_t LayerSize [] = {15, 16, 16, 3};
-
+    char AcFunc []          = {'l', 't', 't', 'l'};
+    size_t LayerSize []     = {15, 16, 16, 3};
     char * ModelFileName    = "ArmTestModel.txt";
     char * BaselineFileName = "ArmTestBaseline.txt";
+    char * ResultFileName   = "ArmTrainingResult.txt";
 
     TRPOparam Param;
     Param.ModelFile    = ModelFileName;
@@ -391,12 +390,10 @@ void Test_TRPO_RunTraining(size_t NumThreads)
     Param.CG_Damping   = 0.1;
 
     
-    printf("----------------------- Run Training Test (%zu Threads) ------------------------\n", NumThreads);
+    printf("----------------------- Run TRPO Training (%zu Threads) ------------------------\n", NumThreads);
     double compTime = RunTraining(Param, NumIterations, NumThreads);
     if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
-
-    // Check Result
-    printf("\n[INFO] CPU Computing Time = %f seconds\n", compTime);
+    printf("\n[INFO] CPU TRPO Training Time = %f seconds\n", compTime);
     printf("---------------------------------------------------------------------\n\n");
     
     return;
@@ -411,12 +408,17 @@ int main()
     
 //    Test_FVP(6);
 //    Test_CG(6);
-    Test_TRPO_Update(6);
+//    Test_TRPO_Update(6);
 
     //////////////////// FPGA ////////////////////
 
 //    Test_FVP_FPGA();
 //    Test_CG_FPGA(6);
+
+    //////////////////// Simulation Based Training ////////////////////
+
+    Test_TRPO_RunTraining(10, 6);
+
 
     return 0;
 }
