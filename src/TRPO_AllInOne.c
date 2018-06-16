@@ -45,7 +45,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
 
     // Number of Policy Parameters
     size_t NumParams     = NumParamsCalc(param.LayerSize, param.NumLayers);
-    size_t NumParamsBase = NumParamsCalc(LayerSizeBase, NumLayers);
+    size_t NumParamsBase = NumParamsCalc(LayerSizeBase, NumLayers) - 1;
     int PaddedParamsBase = (int)ceil((double)NumParamsBase/16.0)*16;
 
     // iterator when traversing through input vector and result vector
@@ -447,7 +447,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 for (int i=0; i<ObservSpaceDim; ++i) {
                     if (obFilterCount == 1) ob[i] = 0;
                     else {
-                        ob[i] = (ob[i]-obMean[i]) / ( sqrt(obVar[i]/(obFilterCount-1)) + 1e-8 );
+                        ob[i] = (ob[i]-obMean[i]) / ( sqrt(obVar[i]/((double)obFilterCount-1)) + 1e-8 );
                         ob[i] = (ob[i] > 5) ? 5 : ( (ob[i]<-5) ? -5 : ob[i] );
                     }
                 }
@@ -674,12 +674,33 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
         
         // Run L-BFGS Algorithm to optimise the Baseline
         lbfgs(BaselineParam.PaddedParams, LBFGS_x, &LBFGS_fx, evaluate, NULL, &BaselineParam, &LBFGS_Param);
+        
+        // Update Baseline Weight and Bias from LBFGS_x
+        pos = 0;
+        for (size_t i=0; i<NumLayers-1; ++i) {
+            size_t curLayerDim  = LayerSizeBase[i];
+            size_t nextLayerDim = LayerSizeBase[i+1];
+            for (size_t j=0; j<curLayerDim;++j) {
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    WBase[i][j*nextLayerDim+k] = LBFGS_x[pos];
+                    pos++;
+                }
+            }
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                BBase[i][k] = LBFGS_x[pos];
+                pos++;
+            }
+        }
 
   
         //////////////////// TRPO Update ////////////////////
   
         ///////// Computing Policy Gradient /////////
 
+        // reset Policy Gradient to 0
+        for (size_t i=0; i<NumParams; ++i) b[i] = 0;
+
+        // Processing all training samples
         for (size_t iter=0; iter<NumSamples; iter++) {
     
             ///////// Ordinary Forward Propagation /////////
@@ -819,6 +840,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
         // Initialisation
         double rdotr = 0;
         for (size_t i=0; i<NumParams; ++i) {
+            x[i] = 0;
             p[i] = b[i];
             r[i] = b[i];
             rdotr += r[i] * r[i];
