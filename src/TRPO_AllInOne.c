@@ -518,9 +518,9 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 ///////// Physical Simulation /////////
                 
                 // Send action to mjData
-                d->ctrl[M0] = (ac[0] > 1) ? 1 : ((ac[0]<-1) ? -1 : ac[0]);
-                d->ctrl[M1] = (ac[1] > 1) ? 1 : ((ac[1]<-1) ? -1 : ac[1]);
-                d->ctrl[M2] = (ac[2] > 1) ? 1 : ((ac[2]<-1) ? -1 : ac[2]);
+                d->ctrl[M0] = ac[0];
+                d->ctrl[M1] = ac[1];
+                d->ctrl[M2] = ac[2];
                 
                 // Run MuJoCo Simulation
                 mjtNum simStart = d->time;
@@ -858,7 +858,7 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
             }
             FrobNorm = sqrt(FrobNorm);
 
-            printf("CG Iter[%zu] Residual Norm=%.12e, Soln Norm=%.12e\n", it, rdotr, FrobNorm);
+            //printf("CG Iter[%zu] Residual Norm=%.12e, Soln Norm=%.12e\n", it, rdotr, FrobNorm);
         
             // Check Termination Condition
             if (rdotr<ResidualTh || it==MaxIter) {
@@ -1460,46 +1460,54 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
             pos++;
         }
 
+        //////////////////// Save Training Result ////////////////////
+
+        // Save training result EVERY 100 Iteration as well as in the Last Iteration
+        if(iter%100==0 || iter==(NumIter-1)) {
     
-    }
+            // Generate Result File Name
+            char ResultFileName[30];
+            strcpy(ResultFileName, ResultFile);
+            char suffix[10];
+            sprintf(suffix, "%03d.txt", iter);
+            strcat(ResultFileName, suffix);
+
+            // Open Result File to write Weights, Bias and LogStd
+            FILE *ResultFilePointer = fopen(ResultFileName, "w");
+            if (ResultFilePointer==NULL) {
+                fprintf(stderr, "[ERROR] Cannot open Result File [%s]. \n", ResultFileName);
+                return -1;
+            }
+    
+            // Write Weights and Bias to file
+            for (size_t i=0; i<NumLayers-1; ++i) {
+                // Weights W[i]: from Layer[i] to Layer[i+1]
+                size_t curLayerDim  = LayerSize[i];
+                size_t nextLayerDim = LayerSize[i+1];
+                for (size_t j=0; j<curLayerDim;++j) {
+                    for (size_t k=0; k<nextLayerDim; ++k) {
+                        fprintf(ResultFilePointer, "%.14f\n", W[i][j*nextLayerDim+k]);
+                    }
+                }
+                // Bias B[i]: from Layer[i] to Layer[i+1]
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    fprintf(ResultFilePointer, "%.14f\n", B[i][k]);
+                }
+            }
+            // LogStd
+            for (size_t k=0; k<ActionSpaceDim; ++k) {
+                fprintf(ResultFilePointer, "%.14f\n", LogStd[k]);
+            }
+
+            // Close Result File
+            fclose(ResultFilePointer);
+        }
+        
+    } // Training Finished
 
     // Toc
     gettimeofday(&tv2, NULL);
     double runtimeS = ((tv2.tv_sec-tv1.tv_sec) * (double)1E6 + (tv2.tv_usec-tv1.tv_usec)) / (double)1E6;
-
-
-    //////////////////// Save Training Result ////////////////////
-    
-    // Open Result File to write Weights, Bias and LogStd
-    FILE *ResultFilePointer = fopen(ResultFile, "w");
-    if (ResultFilePointer==NULL) {
-        fprintf(stderr, "[ERROR] Cannot open Result File [%s]. \n", ResultFile);
-        return -1;
-    }
-    
-    // Write Weights and Bias to file
-    for (size_t i=0; i<NumLayers-1; ++i) {
-        // Weights W[i]: from Layer[i] to Layer[i+1]
-        size_t curLayerDim  = LayerSize[i];
-        size_t nextLayerDim = LayerSize[i+1];
-        for (size_t j=0; j<curLayerDim;++j) {
-            for (size_t k=0; k<nextLayerDim; ++k) {
-                fprintf(ResultFilePointer, "%.14f\n", W[i][j*nextLayerDim+k]);
-            }
-        }
-        // Bias B[i]: from Layer[i] to Layer[i+1]
-        for (size_t k=0; k<nextLayerDim; ++k) {
-            fprintf(ResultFilePointer, "%.14f\n", B[i][k]);
-        }
-    }
-
-    // LogStd
-    for (size_t k=0; k<ActionSpaceDim; ++k) {
-        fprintf(ResultFilePointer, "%.14f\n", LogStd[k]);
-    }
-
-    // Close Result File
-    fclose(ResultFilePointer);
 
 
     //////////////////// Clean Up ////////////////////

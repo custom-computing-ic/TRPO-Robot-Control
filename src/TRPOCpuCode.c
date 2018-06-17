@@ -378,7 +378,7 @@ void Test_TRPO_RunTraining(const int NumIterations, const size_t NumThreads){
     size_t LayerSize []     = {15, 16, 16, 3};
     char * ModelFileName    = "ArmTestModel.txt";
     char * BaselineFileName = "ArmTestBaseline.txt";
-    char * ResultFileName   = "ArmTrainingResult.txt";
+    char * ResultFileName   = "ArmTrainingResult";
 
     TRPOparam Param;
     Param.ModelFile    = ModelFileName;
