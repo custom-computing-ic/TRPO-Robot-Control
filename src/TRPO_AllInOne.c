@@ -22,7 +22,6 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     const size_t NumLayers  = param.NumLayers;
     char * AcFunc           = param.AcFunc;
     size_t * LayerSize      = param.LayerSize;
-    const size_t NumSamples = param.NumSamples;
     char * ModelFile        = param.ModelFile;
     char * BaselineFile     = param.BaselineFile;
     char * ResultFile       = param.ResultFile;
@@ -52,10 +51,13 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     size_t pos;
 
     // Number of Episodes per Batch
-    const int NumEpBatch = 16;
+    const int NumEpBatch = 20;
     
     // Length of Each Episode - timestep_limit
     const int EpLen = 150;
+
+    // Number of Samples
+    size_t NumSamples = NumEpBatch * EpLen;
     
     // Length of Each TimeStep (s)
     const double TimeStepLen = 0.02;
@@ -403,14 +405,17 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
             
             // Generate Random Position for the target
             double target_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084;
-            double target_y = ((double)rand()/(double)RAND_MAX) * 0.100 - 0.005;
+            double target_y = ((double)rand()/(double)RAND_MAX) * 0.100 - 0.05;
             double target_z = ((double)rand()/(double)RAND_MAX) * 0.100;
             
             d->qpos[nq-3] = target_x;
             d->qpos[nq-2] = target_y;
             d->qpos[nq-1] = target_z;
             
-            
+            // Apply Forward Kinematics to calculate xpos based on qpos
+            mj_forward(m, d);
+
+
             ///////// Rollout Several Time Steps in Each Episode /////////
             
             for(int timeStep=0; timeStep<EpLen; ++timeStep) {
@@ -496,24 +501,23 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 // Save Data to Mean Matrix
                 for (int i=0; i<ActionSpaceDim; ++i) Mean[RowAddr*ActionSpaceDim+i] = Layer[NumLayers-1][i];
                 
-                // Save Data to Std Vector - This is actually Redundant
+                // Save Data to Std Vector
                 for (int i=0; i<ActionSpaceDim; ++i) Std[i] = exp(LogStd[i]);
                 
                 // Get Action from Mean - Sample from the distribution
                 for (int i=0; i<ActionSpaceDim; ++i) {
                     // Box-Muller
-                    double u1 = rand() * (1.0 / RAND_MAX);
-                    double u2 = rand() * (1.0 / RAND_MAX);
+                    double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
+                    double u2 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
                     double z0 = sqrt(-2.0 * log(u1)) * cos(2*pi*u2);
                     //double z1 = sqrt(-2.0 * log(u1)) * sin(2*pi*u2);
                     
                     // N(mu, sigma^2) = N(0,1) * sigma + mu
-                    ac[i] = z0 * exp(LogStd[i]) + Layer[NumLayers-1][i];   
+                    ac[i] = z0 * Std[i] + Layer[NumLayers-1][i];
                 }
-                
+
                 // Save Data to Action Matrix
                 for (int i=0; i<ActionSpaceDim; ++i) Action[RowAddr*ActionSpaceDim+i] = ac[i];
-
                 
                 ///////// Physical Simulation /////////
                 
@@ -525,14 +529,13 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 // Run MuJoCo Simulation
                 mjtNum simStart = d->time;
                 while (d->time-simStart < TimeStepLen) mj_step(m, d);
-
                 
                 ///////// Calculate Reward /////////
-          
+
                 // Get Position of the Grip and the Object
                 double   gripPos[3] = {d->xpos[3*grip], d->xpos[3*grip+1], d->xpos[3*grip+2]};
                 double objectPos[3] = {d->xpos[3*object], d->xpos[3*object+1], d->xpos[3*object+2]};
-                
+
                 // Reward Function  TODO Modify Reward Function with -Eculidean Distance - Action Norm?
                 double re = 0;
                 for (int i=0; i<3; ++i) {
@@ -550,14 +553,24 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
         
         }  // End of the MuJoCo Simulation
         
-        ///////// Calculate Mean Episode Rewards  /////////
+        ///////// Calculate Reward Statistics  /////////
         
         double EpRewMean = 0;
         for (int i=0; i<NumSamples; ++i) EpRewMean += Reward[i];
         EpRewMean = EpRewMean / (double) NumEpBatch;
-        
-        printf("[INFO] Iteration %d, Mean Episode Rewards = %f\n", iter, EpRewMean);
-        
+
+        double EpRewStd = 0;
+        for (int i=0; i<NumEpBatch; ++i){
+            double thisEpReward = 0;
+            for (int j=0; j<EpLen; ++j) {
+                thisEpReward += Reward[i*EpLen+j];
+            }
+            EpRewStd += (thisEpReward-EpRewMean)*(thisEpReward-EpRewMean);
+        }
+        EpRewStd = sqrt(EpRewStd / (double) (NumEpBatch));
+
+        printf("[INFO] Iteration %d, Episode Rewards Mean = %f, Std = %f\n", iter, EpRewMean, EpRewStd);
+
         
         ///////// Calculate Advantage /////////
         
