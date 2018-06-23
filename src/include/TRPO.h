@@ -103,7 +103,10 @@ double CG_FPGA(TRPOparam param, double *Result, double *b, size_t MaxIter, doubl
 // TRPO Update on CPU
 double TRPO_Update(TRPOparam param, double *Result, size_t NumThreads);
 
-// TRPO All-In-One
-double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads);
+// TRPO All-In-One with MuJoCo
+double TRPO_MuJoCo (TRPOparam param, const int NumIter, const size_t NumThreads);
+
+// TRPO All-In-One with Lightweight
+double TRPO_Lightweight (TRPOparam param, const int NumIter, const size_t NumThreads);
 
 #endif

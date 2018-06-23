@@ -6,12 +6,10 @@
 #include "omp.h"
 
 #include "TRPO.h"
-#include "mujoco.h"
-#include "mjmodel.h"
 #include "lbfgs.h"
 
 
-double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads) {
+double TRPO_Lightweight (TRPOparam param, const int NumIter, const size_t NumThreads) {
 
     //////////////////// Read Parameters ////////////////////
 
@@ -37,7 +35,6 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     // Layer Size of Baseline
     size_t LayerSizeBase[4] = {16, 16, 16, 1};
 
-
     // Dimension of Observation Space and Action Space
     const size_t ObservSpaceDim = LayerSize[0];
     const size_t ActionSpaceDim = LayerSize[NumLayers-1];
@@ -61,9 +58,9 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     
     // Length of Each TimeStep (s)
     const double TimeStepLen = 0.02;
-     
-    // number of generalized coordinates = dim(qpos)
-    const int nq = 6;
+    
+    // Angular Speed = coeff * Activation
+    double coeff = 1;
     
     // Random Seed
     srand(0);
@@ -346,44 +343,10 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
     // Close Baseline Model File
     fclose(BaselineFilePointer);
 
-
-    //////////////////// Initialisation - Advantage ////////////////////
-
-    // Init Z-Filter count
-    int obFilterCount = 0;
-    int rwFilterCount = 0;
-
     // L-BFGS Optimisation for Baseline Fitting
     lbfgs_parameter_t LBFGS_Param;
     lbfgs_parameter_init(&LBFGS_Param);
     LBFGS_Param.max_iterations = 25;
-
-
-    ///////// Init MuJoCo /////////
-
-    // activate software
-    mj_activate("mjkey.txt");
-    
-    // Load and Compile MuJoCo Simulation Model
-    char errstr[100] = "[ERROR] Could not load binary model";
-    mjModel* m = mj_loadXML("armDOF_0.xml", 0, errstr, 100);
-    if(!m) mju_error_s("[ERROR] Load model error: %s", errstr);    
-
-    // Observation Space: Get ID of "DOF1" "DOF2" "wrist" "grip" "object"
-    const int DOF1   = mj_name2id(m, mjOBJ_BODY, "DOF1");
-    const int DOF2   = mj_name2id(m, mjOBJ_BODY, "DOF2");
-    const int wrist  = mj_name2id(m, mjOBJ_BODY, "wrist");
-    const int grip   = mj_name2id(m, mjOBJ_BODY, "grip");
-    const int object = mj_name2id(m, mjOBJ_BODY, "object");
-    
-    printf("[INFO] ID: DOF1 DOF2 wrist grip object = %d %d %d %d %d\n", DOF1, DOF2, wrist, grip, object);
-    
-    // Action Space: Get ID of "M0" "M1" "M2"
-    const int M0 = mj_name2id(m, mjOBJ_ACTUATOR, "M0");
-    const int M1 = mj_name2id(m, mjOBJ_ACTUATOR, "M1");
-    const int M2 = mj_name2id(m, mjOBJ_ACTUATOR, "M2");
-    
-    printf("[INFO] ID: M0 M1 M2 = %d %d %d\n", M0, M1, M2);
 
 
     //////////////////// Main Loop ////////////////////
@@ -399,21 +362,36 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
         for (int ep=0; ep<NumEpBatch; ++ep) {
 
             ///////// Reset Environment /////////
-        
-            // Init MuJoCo Data - TODO Instead of Make, call reset?
-            mjData* d = mj_makeData(m);
+
+            // Theta
+            double theta_1 = 0;
+            double theta_2 = -pi/2.0;
+            double theta_3 = pi/2.0;
+
+            // DOF1 - Fixed
+            double DOF1_x = 0;
+            double DOF1_y = 0;
+            double DOF1_z = 0.01768;            
+
+            // DOF2
+            double DOF2_x = 0;
+            double DOF2_y = 0;
+            double DOF2_z = 0.07518;
             
-            // Generate Random Position for the target
-            double target_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084;
-            double target_y = ((double)rand()/(double)RAND_MAX) * 0.100 - 0.05;
-            double target_z = ((double)rand()/(double)RAND_MAX) * 0.100;
-            
-            d->qpos[nq-3] = target_x;
-            d->qpos[nq-2] = target_y;
-            d->qpos[nq-1] = target_z;
-            
-            // Apply Forward Kinematics to calculate xpos based on qpos
-            mj_forward(m, d);
+            // Wrist
+            double Wrist_x = 0.07375;
+            double Wrist_y = 0;
+            double Wrist_z = 0.07518;            
+
+            // Grip
+            double Grip_x  = 0.11315;
+            double Grip_y  = 0;
+            double Grip_z  = 0.06268;            
+
+            // Object - Random Position fixed for each Episode
+            double Object_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084;
+            double Object_y = ((double)rand()/(double)RAND_MAX) * 0.100 - 0.05;
+            double Object_z = ((double)rand()/(double)RAND_MAX) * 0.100;
 
 
             ///////// Rollout Several Time Steps in Each Episode /////////
@@ -423,39 +401,22 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 // Row Address of the Simulation Data
                 int RowAddr = ep * EpLen + timeStep;
                 
-                // Get Raw Observation Vector: DOF1 DOF2 wrist grip object
-                int ob_pos = 0;
-                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*DOF1+i];
-                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*DOF2+i];
-                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*wrist+i];
-                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*grip+i];
-                for (int i=0; i<3; ++i) ob[ob_pos++] = d->xpos[3*object+i];
-
-                // Filter Observation Space: Z-Filter
-                // Update Filter
-                obFilterCount++;
-                if (obFilterCount == 1) {
-                    for (int i=0; i<ObservSpaceDim; ++i) {
-                        obMean[i] = ob[i];
-                        obVar[i]  = 0;
-                    }
-                }
-                else {
-                    for (int i=0; i<ObservSpaceDim; ++i) {
-                        double temp = obMean[i];
-                        obMean[i] = obMean[i] + (ob[i] - obMean[i]) / (double)obFilterCount;
-                        obVar[i]  = obVar[i]  + (ob[i] - obMean[i]) * (ob[i] - temp);
-                    }
-             
-                }
-                // Apply Filter
-                for (int i=0; i<ObservSpaceDim; ++i) {
-                    if (obFilterCount == 1) ob[i] = 0;
-                    else {
-                        ob[i] = (ob[i]-obMean[i]) / ( sqrt(obVar[i]/((double)obFilterCount-1)) + 1e-8 );
-                        ob[i] = (ob[i] > 5) ? 5 : ( (ob[i]<-5) ? -5 : ob[i] );
-                    }
-                }
+                // Get Raw Observation Vector: DOF1 DOF2 Wrist Grip Object
+                ob[0] = DOF1_x;
+                ob[1] = DOF1_y;
+                ob[2] = DOF1_z;
+                ob[3] = DOF2_x;
+                ob[4] = DOF2_y;
+                ob[5] = DOF2_z;
+                ob[6] = Wrist_x;
+                ob[7] = Wrist_y;
+                ob[8] = Wrist_z;
+                ob[9] = Grip_x;
+                ob[10] = Grip_y;
+                ob[11] = Grip_z;
+                ob[12] = Object_x;
+                ob[13] = Object_y;
+                ob[14] = Object_z;
 
                 // Save Data to Observation Matrix
                 for (int i=0; i<ObservSpaceDim; ++i) Observ[RowAddr*ObservSpaceDim+i] = ob[i];
@@ -518,24 +479,52 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
 
                 // Save Data to Action Matrix
                 for (int i=0; i<ActionSpaceDim; ++i) Action[RowAddr*ActionSpaceDim+i] = ac[i];
-                
-                ///////// Physical Simulation /////////
-                
-                // Send action to mjData
-                d->ctrl[M0] = ac[0];
-                d->ctrl[M1] = ac[1];
-                d->ctrl[M2] = ac[2];
-                
-                // Run MuJoCo Simulation
-                mjtNum simStart = d->time;
-                while (d->time-simStart < TimeStepLen) mj_step(m, d);
-                
-                ///////// Calculate Reward /////////
 
+                
+                ///////// Lightweight Simulator /////////
+
+                // Update Theta
+                theta_1 += ac[0] * coeff * TimeStepLen;
+                theta_2 += ac[1] * coeff * TimeStepLen;
+                theta_3 += ac[2] * coeff * TimeStepLen;
+                
+                double s1 = sin(theta_1);
+                double c1 = cos(theta_1);
+                double s2 = sin(theta_2);
+                double c2 = cos(theta_2);
+                double s3 = sin(theta_3);
+                double c3 = cos(theta_3);
+                
+                double c2c3 = c2 * c3;
+                double s2s3 = s2 * s3;
+                double c2s3 = c2 * s3;
+                double s2c3 = s2 * c3;
+                
+                // DOF1 and Object positions are fixed
+                
+                // DOF2
+                DOF2_x = 0.0575 * c1 * c2;
+                DOF2_y = 0.0575 * s1 * c2;
+                DOF2_z = 0.01768 - 0.0575 * s2;
+                
+                // Wrist
+                Wrist_x = DOF2_x + 0.07375 * c1 * (c2c3 - s2s3);
+                Wrist_y = DOF2_y + 0.07375 * s1 * (c2c3 - s2s3);
+                Wrist_z = DOF2_z - 0.07375 * (c2s3 + s2c3);
+                
+                // Grip
+                Grip_x  = DOF2_x + 0.11315 * c1 * (c2c3 - s2s3) - 0.0125 * c1 * (c2s3 + s2c3);
+                Grip_y  = DOF2_y + 0.11315 * s1 * (c2c3 - s2s3) - 0.0125 * s1 * (c2s3 + s2c3);
+                Grip_z  = DOF2_z - 0.11315 * (c2s3 + s2c3) + 0.0125 * (s2s3 - c2c3);
+
+        
                 // Get Position of the Grip and the Object
-                double   gripPos[3] = {d->xpos[3*grip], d->xpos[3*grip+1], d->xpos[3*grip+2]};
-                double objectPos[3] = {d->xpos[3*object], d->xpos[3*object+1], d->xpos[3*object+2]};
+                double   gripPos[3] = {Grip_x, Grip_y, Grip_z};
+                double objectPos[3] = {Object_x, Object_y, Object_z};
 
+
+                ///////// Calculating Reward /////////
+                
                 // Reward Function  TODO Modify Reward Function with -Eculidean Distance - Action Norm?
                 double re = 0;
                 for (int i=0; i<3; ++i) {
@@ -547,11 +536,9 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
                 Reward[RowAddr] = re;                            
             
             } // End of Episode
-
-            // Free MuJoCo Data - TODO mj_resetData?
-            mj_deleteData(d);
         
-        }  // End of the MuJoCo Simulation
+        }  // End of the Lightweight Simulation
+
         
         ///////// Calculate Reward Statistics  /////////
         
@@ -1524,10 +1511,6 @@ double RunTraining (TRPOparam param, const int NumIter, const size_t NumThreads)
 
 
     //////////////////// Clean Up ////////////////////
-    
-    // Clean-Up MuJoCo
-    mj_deleteModel(m);
-    mj_deactivate();
     
     // Clean-Up L-BFGS
     lbfgs_free(LBFGS_x);

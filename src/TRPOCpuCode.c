@@ -371,7 +371,7 @@ void Test_TRPO_Update(size_t NumThreads)
 }
 */
 
-void Test_TRPO_RunTraining(const int NumIterations, const size_t NumThreads){
+void Test_TRPO_MuJoCo(const int NumIterations, const size_t NumThreads){
 	
     // ArmDOF_0-v0
     char AcFunc []          = {'l', 't', 't', 'l'};
@@ -392,7 +392,7 @@ void Test_TRPO_RunTraining(const int NumIterations, const size_t NumThreads){
 
     
     printf("----------------------- Run TRPO Training (%zu Threads) ------------------------\n", NumThreads);
-    double compTime = RunTraining(Param, NumIterations, NumThreads);
+    double compTime = TRPO_MuJoCo (Param, NumIterations, NumThreads);
     if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
     printf("\n[INFO] CPU TRPO Training Time = %f seconds\n", compTime);
     printf("---------------------------------------------------------------------\n\n");
@@ -418,7 +418,7 @@ int main()
 
     //////////////////// Simulation Based Training ////////////////////
 
-    Test_TRPO_RunTraining(10, 6);
+    Test_TRPO_MuJoCo(10, 6);
 
 
     return 0;
