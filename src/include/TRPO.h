@@ -109,4 +109,7 @@ double TRPO_MuJoCo (TRPOparam param, const int NumIter, const size_t NumThreads)
 // TRPO All-In-One with Lightweight
 double TRPO_Lightweight (TRPOparam param, const int NumIter, const size_t NumThreads);
 
+// Record TRPO Video via MuJoCo
+void TRPO_Video (TRPOparam param, char * ModelFile);
+
 #endif

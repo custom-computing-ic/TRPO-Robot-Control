@@ -402,8 +402,15 @@ void Test_TRPO_MuJoCo(const int NumIterations, const size_t NumThreads){
 
 
 
-int main()
-{
+int main() {
+
+    // ArmDOF_0-v0
+    TRPOparam Param;
+    char AcFunc[4]      = {'l', 't', 't', 'l'};
+    size_t LayerSize[4] = {15, 16, 16, 3};
+    Param.NumLayers     = 4;
+    Param.AcFunc        = AcFunc;
+    Param.LayerSize     = LayerSize;
 
     //////////////////// Fisher Vector Product Computation ////////////////////
     
@@ -418,8 +425,8 @@ int main()
 
     //////////////////// Simulation Based Training ////////////////////
 
-    Test_TRPO_MuJoCo(10, 6);
-
+    Test_TRPO_MuJoCo(101, 6);
+    TRPO_Video(Param, "ArmTrainingResult100.txt");
 
     return 0;
 }
