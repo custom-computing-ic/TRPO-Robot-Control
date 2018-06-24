@@ -7,16 +7,14 @@
 
 #include "TRPO.h"
 #include "mujoco.h"
-#include "mjmodel.h"
 #include "glfw3.h"
 
+#include "svpng.inc"
 
-void TRPO_Video (TRPOparam param, char * ModelFile) {
+
+int TRPO_Video (TRPOparam param, char * ModelFile) {
 
     //////////////////// Read Parameters ////////////////////
-
-    // OpenMP Settings
-    omp_set_num_threads(NumThreads);
 
     // Assign Parameters
     const size_t NumLayers  = param.NumLayers;
@@ -52,11 +50,11 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
     // B[i]: Bias Vector from Layer[i] to Layer[i+1]
     // Item (j,k) in W[i] refers to the weight from Neuron #j in Layer[i] to Neuron #k in Layer[i+1]
     // Item B[k] is the bias of Neuron #k in Layer[i+1]
-    double * W [NumLayers-1];
-    double * B [NumLayers-1];
+    double * _W [NumLayers-1];
+    double * _B [NumLayers-1];
     for (size_t i=0; i<NumLayers-1; ++i) {
-        W[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
-        B[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
+        _W[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
+        _B[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
     }
     
     // LogStd[i] is the log of std[i] in the policy
@@ -71,8 +69,8 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
 
     //////////////////// Memory Allocation - Observation and Action ////////////////////
 
-    double * ob     = (double *) calloc(ObservSpaceDim, sizeof(double));
-    double * ac     = (double *) calloc(ActionSpaceDim, sizeof(double));
+    double * ob = (double *) calloc(ObservSpaceDim, sizeof(double));
+    double * ac = (double *) calloc(ActionSpaceDim, sizeof(double));
 
 
     //////////////////// Initialisation - Neural Network ////////////////////
@@ -94,12 +92,12 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
         size_t nextLayerDim = LayerSize[i+1];
         for (size_t j=0; j<curLayerDim;++j) {
             for (size_t k=0; k<nextLayerDim; ++k) {
-                fscanf(ModelFilePointer, "%lf", &W[i][j*nextLayerDim+k]);
+                fscanf(ModelFilePointer, "%lf", &_W[i][j*nextLayerDim+k]);
             }
         }
         // Reading Bias B[i]: from Layer[i] to Layer[i+1]
         for (size_t k=0; k<nextLayerDim; ++k) {
-            fscanf(ModelFilePointer, "%lf", &B[i][k]);
+            fscanf(ModelFilePointer, "%lf", &_B[i][k]);
         }
     }
 
@@ -115,15 +113,13 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
     ///////// Init OpenGL /////////
 
     // init GLFW
-    if( !glfwInit() )
-        mju_error("Could not initialize GLFW");
+    if( !glfwInit() ) mju_error("Could not initialize GLFW");
 
     // create invisible window, single-buffered
     glfwWindowHint(GLFW_VISIBLE, 0);
     glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(800, 800, "Invisible window", NULL, NULL);
-    if( !window )
-        mju_error("Could not create GLFW window");
+    GLFWwindow* window = glfwCreateWindow(640, 480, "Invisible window", NULL, NULL);
+    if(!window) mju_error("Could not create GLFW window");
 
     // make context current
     glfwMakeContextCurrent(window);
@@ -164,9 +160,11 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
         printf("Warning: offscreen rendering not supported, using default/window framebuffer\n");
 
     // get size of active renderbuffer
-    mjrRect viewport =  mjr_maxViewport(&con);
+    mjrRect viewport = mjr_maxViewport(&con);
     int W = viewport.width;
     int H = viewport.height;
+
+    printf("[INFO] Video Resolution is %d*%d\n", W, H);
 
     // allocate rgb and depth buffers
     unsigned char* rgb = (unsigned char*)malloc(3*W*H);
@@ -178,7 +176,7 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
     strcpy(ResultFileName, ModelFile);
     char suffix[8];
     strcpy(suffix, ".out");
-    strcat(ResultFileName, suffix);    
+    strcat(ResultFileName, suffix);
     FILE* fp = fopen(ResultFileName, "wb");
     if(!fp) mju_error("Could not open rgbfile for writing");
 
@@ -186,7 +184,7 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
     mjData* d = mj_makeData(m);
             
     // Generate Random Position for the target
-    double target_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084;
+    double target_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084 + 0.01;
     double target_y = ((double)rand()/(double)RAND_MAX) * 0.100 - 0.05;
     double target_z = ((double)rand()/(double)RAND_MAX) * 0.100;
             
@@ -234,14 +232,6 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
         // read rgb and depth buffers
         mjr_readPixels(rgb, depth, viewport, &con);
 
-        // insert subsampled depth image in lower-left corner of rgb image
-        const int NS = 3;           // depth image sub-sampling
-        for(int r=0; r<H; r+=NS ){
-            for(int c=0; c<W; c+=NS){
-                int adr = (r/NS)*W + c/NS;
-                rgb[3*adr] = rgb[3*adr+1] = rgb[3*adr+2] = (unsigned char)((1.0f-depth[r*W+c])*255.0f);
-            }
-        }
         // write rgb image to file
         fwrite(rgb, 3, W*H, fp);
 
@@ -251,6 +241,20 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
             else printf(".");
         }
 
+        // Create a PNG Screenshot every 50 frames
+        // TODO Image seems to be flipped vertically and mirrored
+        /*
+        if(timeStep%50==0) {
+            char PNGFileName[30];
+            strcpy(PNGFileName, ModelFile);
+            char PNGsuffix[10];
+            sprintf(PNGsuffix, "%d.png", timeStep);
+            strcat(PNGFileName, PNGsuffix);        
+            FILE *fp1 = fopen(PNGFileName, "wb");
+            svpng(fp1, 640, 480, rgb, 0);
+            fclose(fp1);
+        }
+        */
 
         ///////// Robot Controller /////////
 
@@ -271,10 +275,10 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
             for (size_t j=0; j<LayerSize[i+1]; ++j) {
                 
                 // Calculating pre-activated value for item[j] in next layer
-                Layer[i+1][j] = B[i][j];
+                Layer[i+1][j] = _B[i][j];
                 for (size_t k=0; k<LayerSize[i]; ++k) {
                     // From Neuron #k in Layer[i] to Neuron #j in Layer[i+1]
-                    Layer[i+1][j] += Layer[i][k] * W[i][k*LayerSize[i+1]+j];
+                    Layer[i+1][j] += Layer[i][k] * _W[i][k*LayerSize[i+1]+j];
                 }
 
                 // Apply Activation Function
@@ -318,7 +322,9 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
         mj_step(m, d);
     }
 
-    printf("\n");
+    printf("\n[INFO] Run the following command:\n");
+    printf("ffmpeg -f rawvideo -pixel_format rgb24 -video_size 640x480 -framerate 50 -i %s -vf \"vflip\" %s.mp4 \n", ResultFileName, ModelFile);
+
 
     //////////////////// Clean Up ////////////////////
 
@@ -326,12 +332,12 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
     fclose(fp);
     free(rgb);
     free(depth);
-    
+
     // Clean-Up MuJoCo
     mj_deleteData(d);
     mj_deleteModel(m);
     mjr_freeContext(&con);
-    mjv_freeScene(&scn);    
+    mjv_freeScene(&scn);
     mj_deactivate();
 
     // Terminate OpenGL
@@ -339,10 +345,10 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
 
     // Model: Weight, Bias, LogStd
     for (size_t i=0; i<NumLayers-1; ++i) {
-        free(W[i]); free(B[i]); 
+        free(_W[i]); free(_B[i]);
     }
     free(LogStd);
-    
+
     // Model: Forward Propagation
     for (size_t i=0; i<NumLayers; ++i) {
         free(Layer[i]);
@@ -350,8 +356,8 @@ void TRPO_Video (TRPOparam param, char * ModelFile) {
 
     // MuJoCo: Observation, Action
     free(ob); free(ac);
-    
-    return;
+
+    return 0;
 }
 
 

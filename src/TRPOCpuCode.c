@@ -400,7 +400,34 @@ void Test_TRPO_MuJoCo(const int NumIterations, const size_t NumThreads){
     return;
 }
 
+void Test_TRPO_Lightweight(const int NumIterations, const size_t NumThreads){
+	
+    // ArmDOF_0-v0
+    char AcFunc []          = {'l', 't', 't', 'l'};
+    size_t LayerSize []     = {15, 16, 16, 3};
+    char * ModelFileName    = "ArmTestModel.txt";
+    char * BaselineFileName = "ArmTestBaseline.txt";
+    char * ResultFileName   = "ArmTrainingResult";
 
+    TRPOparam Param;
+    Param.ModelFile    = ModelFileName;
+    Param.BaselineFile = BaselineFileName;
+    Param.ResultFile   = ResultFileName;
+    Param.NumLayers    = 4;
+    Param.AcFunc       = AcFunc;
+    Param.LayerSize    = LayerSize;
+    Param.NumSamples   = 2400;
+    Param.CG_Damping   = 0.1;
+
+    
+    printf("----------------------- Run TRPO Training (%zu Threads) ------------------------\n", NumThreads);
+    double compTime = TRPO_Lightweight (Param, NumIterations, NumThreads);
+    if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
+    printf("\n[INFO] CPU TRPO Training Time = %f seconds\n", compTime);
+    printf("---------------------------------------------------------------------\n\n");
+    
+    return;
+}
 
 int main() {
 
@@ -425,8 +452,9 @@ int main() {
 
     //////////////////// Simulation Based Training ////////////////////
 
-    Test_TRPO_MuJoCo(101, 6);
-    TRPO_Video(Param, "ArmTrainingResult100.txt");
+    //Test_TRPO_MuJoCo(101, 6);
+    //Test_TRPO_Lightweight(201, 6);
+    TRPO_Video(Param, "Arm200.txt");
 
     return 0;
 }

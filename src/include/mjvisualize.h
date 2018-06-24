@@ -1,19 +1,19 @@
-//-----------------------------------//
-//  This file is part of MuJoCo.     //
-//  Copyright (C) 2016 Roboti LLC.   //
-//-----------------------------------//
+//---------------------------------//
+//  This file is part of MuJoCo    //
+//  Written by Emo Todorov         //
+//  Copyright (C) 2017 Roboti LLC  //
+//---------------------------------//
 
 
 #pragma once
 
 
-//---------------------------- global constants -----------------------------------------
-
 #define mjNGROUP        5           // number of geom and site groups with visflags
 #define mjMAXOVERLAY    500         // maximum number of characters in overlay text
+#define mjMAXLINE       100         // maximum number of lines per plot
+#define mjMAXLINEPNT    500         // maximum number points per line
+#define mjMAXPLANEGRID  100         // maximum number of grid points for plane rendering
 
-
-//------------------------------- 3D visualization --------------------------------------
 
 typedef enum _mjtCatBit             // bitflags for mjvGeom category
 {
@@ -43,6 +43,15 @@ typedef enum _mjtPertBit            // mouse perturbations
 } mjtPertBit;
 
 
+typedef enum _mjtCamera             // abstract camera type
+{
+    mjCAMERA_FREE        = 0,       // free camera
+    mjCAMERA_TRACKING,              // tracking camera; uses trackbodyid 
+    mjCAMERA_FIXED,                 // fixed camera; uses fixedcamid
+    mjCAMERA_USER                   // user is responsible for setting OpenGL camera
+} mjtCamera;
+
+
 typedef enum _mjtLabel              // object labeling
 {
     mjLABEL_NONE        = 0,        // nothing
@@ -57,8 +66,9 @@ typedef enum _mjtLabel              // object labeling
     mjLABEL_CONSTRAINT,             // constraint labels
     mjLABEL_SELECTION,              // selected object
     mjLABEL_SELPNT,                 // coordinates of selection point
+    mjLABEL_CONTACTFORCE,           // magnitude of contact force
 
-    mjNLABEL						// number of label types
+    mjNLABEL                        // number of label types
 } mjtLabel;
 
 
@@ -68,11 +78,11 @@ typedef enum _mjtFrame              // frame visualization
     mjFRAME_BODY,                   // body frames
     mjFRAME_GEOM,                   // geom frames
     mjFRAME_SITE,                   // site frames
-    mjFRAME_CAMERA,					// camera frame
-    mjFRAME_LIGHT,					// light frame
+    mjFRAME_CAMERA,                 // camera frames
+    mjFRAME_LIGHT,                  // light frames
     mjFRAME_WORLD,                  // world frame
 
-    mjNFRAME						// number of visualization frames
+    mjNFRAME                        // number of visualization frames
 } mjtFrame;
 
 
@@ -82,8 +92,8 @@ typedef enum _mjtVisFlag            // flags enabling model element visualizatio
     mjVIS_TEXTURE,                  // textures
     mjVIS_JOINT,                    // joints
     mjVIS_ACTUATOR,                 // actuators
-    mjVIS_CAMERA,					// cameras
-    mjVIS_LIGHT,					// lights
+    mjVIS_CAMERA,                   // cameras
+    mjVIS_LIGHT,                    // lights
     mjVIS_CONSTRAINT,               // point constraints
     mjVIS_INERTIA,                  // equivalent inertia boxes
     mjVIS_PERTFORCE,                // perturbation force
@@ -101,111 +111,185 @@ typedef enum _mjtVisFlag            // flags enabling model element visualizatio
 } mjtVisFlag;
 
 
-struct _mjvGeom                     // all info needed to specify one abstract geom
+typedef enum _mjtRndFlag            // flags enabling rendering effects
 {
-    // type info
-    int     type;                   // geom type (mjtGeom)
-    int     dataid;                 // mesh, hfield or plane id; -1: none
-    int     objtype;                // mujoco object type; mjOBJ_UNKNOWN for decor
-    int     objid;                  // mujoco object id; -1 for decor
-    int     category;               // visual category
-    int     texid;                  // texture id; -1: no texture
-    int     texuniform;             // uniform cube mapping
+    mjRND_SHADOW        = 0,        // shadows
+    mjRND_WIREFRAME,                // wireframe
+    mjRND_REFLECTION,               // reflections
+    mjRND_FOG,                      // fog
+    mjRND_SKYBOX,                   // skybox
 
-    // OpenGL info
-    float   texrepeat[2];           // texture repetition for 2D mapping
-    float   size[3];                // size parameters
-    float   pos[3];                 // Cartesian position
-    float   mat[9];                 // Cartesian orientation
-    float   rgba[4];                // color and transparency
-    float   emission;               // emission coef
-    float   specular;               // specular coef
-    float   shininess;              // shininess coef
-    float   reflectance;            // reflectance coef
-    char    label[100];             // text label
+    mjNRNDFLAG                      // number of rendering flags
+} mjtRndFlag;
 
-    // transparency rendering (set internally)
-    float   camdist;                // distance to camera (used by sorter)
-    float   rbound;                 // rbound if known, otherwise 0
-    mjtByte transparent;            // treat geom as transparent
+
+typedef enum _mjtStereo             // type of stereo rendering
+{
+    mjSTEREO_NONE       = 0,        // no stereo; use left eye only
+    mjSTEREO_QUADBUFFERED,          // quad buffered; revert to side-by-side if no hardware support
+    mjSTEREO_SIDEBYSIDE             // side-by-side
+} mjtStereo;
+
+
+struct _mjvPerturb                  // object selection and perturbation
+{
+    int      select;                // selected body id; non-positive: none
+    int      active;                // perturbation bitmask (mjtPertBit)
+    mjtNum   refpos[3];             // desired position for selected object
+    mjtNum   refquat[4];            // desired orientation for selected object
+    mjtNum   localpos[3];           // selection point in object coordinates
+    mjtNum   scale;                 // relative mouse motion-to-space scaling (set by initPerturb)
 };
-typedef struct _mjvGeom mjvGeom;
+typedef struct _mjvPerturb mjvPerturb;
 
 
-struct _mjvOption                   // visualization options, window-specific
+struct _mjvCamera                   // abstract camera
 {
-    int     label;                  // what objects to label (mjtLabel)
-    int     frame;                  // which frame to show (mjtFrame)
-    mjtByte geomgroup[mjNGROUP];    // geom visualization by group
-    mjtByte sitegroup[mjNGROUP];    // site visualization by group
-    mjtByte flags[mjNVISFLAG];      // visualization flags (indexed by mjtVisFlag)
-};
-typedef struct _mjvOption mjvOption;
+    // type and ids
+    int      type;                  // camera type (mjtCamera)
+    int      fixedcamid;            // fixed camera id
+    int      trackbodyid;           // body id to track
 
-
-struct _mjvCameraPose               // low-level camera parameters
-{
-    mjtNum  head_pos[3];            // head position
-    mjtNum  head_right[3];          // head right axis
-    mjtNum  window_pos[3];          // window center position
-    mjtNum  window_right[3];        // window/monitor right axis
-    mjtNum  window_up[3];           // window/monitor up axis
-    mjtNum  window_normal[3];       // window/monitor normal axis
-    mjtNum  window_size[2];         // physical window size
-    mjtNum  scale;                  // uniform model scaling rel.to origin
-    mjtNum  ipd;                    // inter-pupilary distance
-};
-typedef struct _mjvCameraPose mjvCameraPose;
-
-
-struct _mjvCamera                   // camera control, window-specific
-{
-    // constant parameters
-    mjtNum  fovy;                   // y-field of view (deg)
-
-    // camera id, trackbody id
-    int     camid;                  // fixed camera id; -1: free
-    int     trackbodyid;            // body id to track; -1: no tracking
-
-    // free camera parameters, used to compute camera pose
-    mjtNum  lookat[3];              // where the camera is looking
-    mjtNum  azimuth;                // camera azimuth (in DEG)
-    mjtNum  elevation;              // camera elevation (in DEG)
-    mjtNum  distance;               // distance to lookat point
-
-    // physical parameters that determine actual rendering
-    mjvCameraPose pose;             // head, window, scale, ipd
-
-    mjtByte VR;                     // VR mode: use pose directly
+    // abstract camera pose specification
+    mjtNum   lookat[3];             // lookat point
+    mjtNum   distance;              // distance to lookat point or tracked body
+    mjtNum   azimuth;               // camera azimuth (deg)
+    mjtNum   elevation;             // camera elevation (deg)
 };
 typedef struct _mjvCamera mjvCamera;
 
 
-struct _mjvLight                    // light
+struct _mjvGLCamera                 // OpenGL camera
 {
-    float   pos[3];                 // position rel. to body frame              
-    float   dir[3];                 // direction rel. to body frame             
-    float   attenuation[3];         // OpenGL attenuation (quadratic model)     
-    float   cutoff;                 // OpenGL cutoff                            
-    float   exponent;               // OpenGL exponent                          
-    float   ambient[3];             // ambient rgb (alpha=1)                    
-    float   diffuse[3];             // diffuse rgb (alpha=1)                    
-    float   specular[3];            // specular rgb (alpha=1)
-    mjtByte headlight;              // headlight
-    mjtByte directional;            // directional light                        
-    mjtByte castshadow;             // does light cast shadows                  
+    // camera frame
+    float    pos[3];                // position
+    float    forward[3];            // forward direction
+    float    up[3];                 // up direction
+
+    // camera projection
+    float    frustum_center;        // hor. center (left,right set to match aspect)
+    float    frustum_bottom;        // bottom
+    float    frustum_top;           // top
+    float    frustum_near;          // near
+    float    frustum_far;           // far
+};
+typedef struct _mjvGLCamera mjvGLCamera;
+
+
+struct _mjvGeom                     // abstract geom
+{
+    // type info
+    int      type;                  // geom type (mjtGeom)
+    int      dataid;                // mesh, hfield or plane id; -1: none
+    int      objtype;               // mujoco object type; mjOBJ_UNKNOWN for decor
+    int      objid;                 // mujoco object id; -1 for decor
+    int      category;              // visual category
+    int      texid;                 // texture id; -1: no texture
+    int      texuniform;            // uniform cube mapping
+
+    // OpenGL info
+    float    texrepeat[2];          // texture repetition for 2D mapping
+    float    size[3];               // size parameters
+    float    pos[3];                // Cartesian position
+    float    mat[9];                // Cartesian orientation
+    float    rgba[4];               // color and transparency
+    float    emission;              // emission coef
+    float    specular;              // specular coef
+    float    shininess;             // shininess coef
+    float    reflectance;           // reflectance coef
+    char     label[100];            // text label
+
+    // transparency rendering (set internally)
+    float    camdist;               // distance to camera (used by sorter)
+    float    modelrbound;           // geom rbound from model, 0 if not model geom
+    mjtByte  transparent;           // treat geom as transparent
+};
+typedef struct _mjvGeom mjvGeom;
+
+
+struct _mjvLight                    // OpenGL light
+{
+    float    pos[3];                // position rel. to body frame              
+    float    dir[3];                // direction rel. to body frame             
+    float    attenuation[3];        // OpenGL attenuation (quadratic model)     
+    float    cutoff;                // OpenGL cutoff                            
+    float    exponent;              // OpenGL exponent                          
+    float    ambient[3];            // ambient rgb (alpha=1)                    
+    float    diffuse[3];            // diffuse rgb (alpha=1)                    
+    float    specular[3];           // specular rgb (alpha=1)
+    mjtByte  headlight;             // headlight
+    mjtByte  directional;           // directional light                        
+    mjtByte  castshadow;            // does light cast shadows                  
 };
 typedef struct _mjvLight mjvLight;
 
 
-struct _mjvObjects                  // collection of abstract visualization objects
+struct _mjvOption                   // abstract visualization options
 {
-    int nlight;                     // number of lights currently in buffer
-    int ngeom;                      // number of geoms currently in buffer
-    int maxgeom;                    // size of allocated geom buffer
-
-    mjvLight lights[8];             // buffer for lights
-    mjvGeom* geoms;                 // buffer for geoms; managed by mjv_make/clearObjects
-    int*     geomorder;             // buffer for ordering geoms by distance to camera
+    int      label;                 // what objects to label (mjtLabel)
+    int      frame;                 // which frame to show (mjtFrame)
+    mjtByte  geomgroup[mjNGROUP];   // geom visualization by group
+    mjtByte  sitegroup[mjNGROUP];   // site visualization by group
+    mjtByte  flags[mjNVISFLAG];     // visualization flags (indexed by mjtVisFlag)
 };
-typedef struct _mjvObjects mjvObjects;
+typedef struct _mjvOption mjvOption;
+
+
+struct _mjvScene                    // abstract scene passed to OpenGL renderer
+{
+    // abstract geoms
+    int      maxgeom;               // size of allocated geom buffer
+    int      ngeom;                 // number of geoms currently in buffer
+    mjvGeom* geoms;                 // buffer for geoms
+    int*     geomorder;             // buffer for ordering geoms by distance to camera
+
+    // OpenGL lights
+    int      nlight;                // number of lights currently in buffer
+    mjvLight lights[8];             // buffer for lights
+
+    // OpenGL cameras
+    mjvGLCamera camera[2];          // left and right camera
+
+    // OpenGL model transformation
+    mjtByte  enabletransform;       // enable model transformation
+    float    translate[3];          // model translation
+    float    rotate[4];             // model quaternion rotation
+    float    scale;                 // model scaling
+
+    // OpenGL rendering effects
+    int      stereo;                // stereoscopic rendering (mjtStereo)
+    mjtByte  flags[mjNRNDFLAG];     // rendering flags (indexed by mjtRndFlag)
+};
+typedef struct _mjvScene mjvScene;
+
+
+struct _mjvFigure                   // abstract 2D figure passed to OpenGL renderer
+{
+    // enable/disable flags
+    int     flg_legend;             // show legend
+    int     flg_ticklabel[2];       // show grid tick labels (x,y)
+    int     flg_extend;             // automatically extend axis ranges to fit data
+    int     flg_barplot;            // isolated line segments (i.e. GL_LINES)
+
+    // figure options
+    int     gridsize[2];            // number of grid points in (x,y)
+    float   gridrgb[3];             // grid line rgb
+    float   gridwidth;              // grid line width
+    float   figurergba[4];          // figure color and alpha
+    float   legendrgba[4];          // legend color and alpha
+    float   textrgb[3];             // text color
+    float   range[2][2];            // axis ranges; (min>=max) automatic
+    char    xlabel[100];            // x-axis label
+    char    title[100];             // figure title
+    char    xformat[20];            // x-tick label format for sprintf
+    char    yformat[20];            // y-tick label format for sprintf
+    char    minwidth[20];           // string used to determine min y-tick width
+
+    // line data
+    int     linepnt[mjMAXLINE];                   // number of points in line; (0) disable
+    float   linergb[mjMAXLINE][3];                // line color
+    float   linewidth[mjMAXLINE];                 // line width
+    float   linedata[mjMAXLINE][2*mjMAXLINEPNT];  // line data (x,y)
+    char    linename[mjMAXLINE][100];             // line name for legend
+};
+typedef struct _mjvFigure mjvFigure;

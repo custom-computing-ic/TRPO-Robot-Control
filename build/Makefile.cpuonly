@@ -3,13 +3,14 @@
 ####################################################
 
 CFLAGS= -O3 -march=native -std=c++11 -fopenmp -I../src/include
-LFLAGS= ../src/bin/libmujoco131.so ../src/bin/libglfw.so.3 -lm -lGL -lpthread -fPIC
+LFLAGS= ../src/bin/libmujoco150.so ../src/bin/libglew.so ../src/bin/libglfw.so.3 -lGL -lm -lpthread -fPIC
 
-CPUFILES= ../src/TRPO_MuJoCo.c ../src/TRPO_Lightweight.c ../src/TRPO_Util.c ../src/TRPOCpuCode.c ../src/lbfgs.c ../src/TRPO_Baseline.c
+CPUFILES= ../src/TRPO_MuJoCo.c ../src/TRPO_Lightweight.c ../src/TRPO_Util.c ../src/TRPOCpuCode.c ../src/lbfgs.c ../src/TRPO_Baseline.c ../src/TRPO_Video.c
 
 build:
 	g++ $(CFLAGS) $(CPUFILES) $(LFLAGS) -o TRPO
 run:
+	export LD_LIBRARY_PATH=../src/bin
 	./TRPO
 clean:
 	rm TRPO ArmTrainingResult*

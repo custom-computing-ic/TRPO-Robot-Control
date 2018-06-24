@@ -1,7 +1,8 @@
-//-----------------------------------//
-//  This file is part of MuJoCo.     //
-//  Copyright (C) 2016 Roboti LLC.   //
-//-----------------------------------//
+//---------------------------------//
+//  This file is part of MuJoCo    //
+//  Written by Emo Todorov         //
+//  Copyright (C) 2017 Roboti LLC  //
+//---------------------------------//
 
 
 #pragma once
@@ -18,7 +19,7 @@ typedef enum _mjtWarning            // warning types
     mjWARN_BADQPOS,                 // bad number in qpos
     mjWARN_BADQVEL,                 // bad number in qvel
     mjWARN_BADQACC,                 // bad number in qacc
-    mjWARN_SOLVER,					// poor solver convergence
+    mjWARN_BADCTRL,                 // bad number in ctrl
 
     mjNWARNING                      // number of warnings
 } mjtWarning;
@@ -28,16 +29,15 @@ typedef enum _mjtTimer
 {
     // main api
     mjTIMER_STEP        = 0,        // step
+    mjTIMER_FORWARD,                // forward
     mjTIMER_INVERSE,                // inverse
 
-    // breakdown of step
+    // breakdown of step/forward
     mjTIMER_POSITION,               // fwdPosition
     mjTIMER_VELOCITY,               // fwdVelocity
     mjTIMER_ACTUATION,              // fwdActuation
     mjTIMER_ACCELERATION,           // fwdAcceleration
     mjTIMER_CONSTRAINT,             // fwdConstraint
-    mjTIMER_SENSOR,                 // sensor
-    mjTIMER_ENERGY,                 // energy
 
     // breakdown of fwdPosition
     mjTIMER_POS_KINEMATICS,         // kinematics, com, tendon, transmission
@@ -65,10 +65,9 @@ struct _mjContact                   // result of collision detection functions
     mjtNum solref[mjNREF];          // constraint solver reference
     mjtNum solimp[mjNIMP];          // constraint solver impedance
 
-    // storage used internally by constraint solver
-    mjtNum mu;						// friction of regularized cone
-    mjtNum coef[5];					// coefficients of middle-zone distance formula
-    int zone;						// 0: top, 1: middle, 2: bottom
+    // internal storage used by solver
+    mjtNum mu;                      // friction of regularized cone, set by mj_makeR
+    mjtNum H[36];                   // cone Hessian, set by mj_updateConstraint
 
     // contact descriptors set by mj_collideGeoms
     int dim;                        // contact space dimensionality: 1, 3, 4 or 6
@@ -84,6 +83,37 @@ struct _mjContact                   // result of collision detection functions
 typedef struct _mjContact mjContact;
 
 
+//------------------------------ diagnostics --------------------------------------------
+
+struct _mjWarningStat               // warning statistics
+{
+    int lastinfo;                   // info from last warning
+    int number;                     // how many times was warning raised
+};
+typedef struct _mjWarningStat mjWarningStat;
+
+
+struct _mjTimerStat                 // timer statistics
+{
+    mjtNum duration;                // cumulative duration
+    int number;                     // how many times was timer called
+};
+typedef struct _mjTimerStat mjTimerStat;
+
+
+struct _mjSolverStat                // per-iteration solver statistics
+{
+    mjtNum improvement;             // cost reduction, scaled by 1/trace(M(qpos0))
+    mjtNum gradient;                // gradient norm (primal only, scaled)
+    mjtNum lineslope;               // slope in linesearch
+    int nactive;                    // number of active constraints
+    int nchange;                    // number of constraint state changes
+    int neval;                      // number of cost evaluations in line search
+    int nupdate;                    // number of Cholesky updates in line search
+};
+typedef struct _mjSolverStat mjSolverStat;
+
+
 //---------------------------------- mjData ---------------------------------------------
 
 struct _mjData
@@ -92,30 +122,31 @@ struct _mjData
     int nstack;                     // number of mjtNums that can fit in stack
     int nbuffer;                    // size of main buffer in bytes
 
-    // stack info
+    // stack pointer
     int pstack;                     // first available mjtNum address in stack
-    int maxstackuse;                // keep track of maximum stack allocation
 
-        // also keep track of maxefcuse and maxconuse ???
+    // memory utilization stats
+    int maxuse_stack;               // maximum stack allocation
+    int maxuse_con;                 // maximum number of contacts
+    int maxuse_efc;                 // maximum number of scalar constraints
+
+    // diagnostics
+    mjWarningStat warning[mjNWARNING]; // warning statistics
+    mjTimerStat timer[mjNTIMER];       // timer statistics
+    mjSolverStat solver[mjNSOLVER];    // solver statistics per iteration
+    int solver_iter;                // number of solver iterations
+    int solver_nnz;                 // number of non-zeros in Hessian or efc_AR
+    mjtNum solver_fwdinv[2];        // forward-inverse comparison: qfrc, efc
 
     // variable sizes
     int ne;                         // number of equality constraints
     int nf;                         // number of friction constraints
     int nefc;                       // number of constraints
     int ncon;                       // number of detected contacts
-    int nwarning[mjNWARNING];       // how many times is each warning generated
-    int warning_info[mjNWARNING];   // warning-related info (index or size)
-
-    // timing
-    mjtNum timer_duration[mjNTIMER];// accumulated duration in microsec
-    mjtNum timer_ncall[mjNTIMER];   // number of calls over which duration accumulated
-    mjtNum mocaptime[3];            // hardware time, cpu time, sim time
 
     // global properties
     mjtNum time;                    // simulation time
-    mjtNum energy[2];               // kinetic, potential energy
-    mjtNum solverstat[4];           // iterations, gradnorm, fwdinv_qfrc, fwdinv_efc
-    mjtNum solvertrace[mjNTRACE];	// gradnorm over solver iterations (0: terminator)
+    mjtNum energy[2];               // potential, kinetic energy
 
     //-------------------------------- end of info header
 
@@ -144,10 +175,10 @@ struct _mjData
     mjtNum*  mocap_quat;            // orientations of mocap bodies             (nmocap x 4)
 
     // user data
-    mjtNum*  userdata;             // user data, not touched by engine          (nuserdata x 1)
+    mjtNum*  userdata;              // user data, not touched by engine         (nuserdata x 1)
 
     // sensors
-    mjtNum*  sensordata;           // sensor data array                         (nsensordata x 1)
+    mjtNum*  sensordata;            // sensor data array                        (nsensordata x 1)
 
     //-------------------------------- POSITION dependent
 
@@ -169,7 +200,7 @@ struct _mjData
     mjtNum*   light_xdir;           // Cartesian light direction                (nlight x 3)
 
     // computed by mj_fwdPosition/mj_comPos
-    mjtNum*   com_subtree;          // center of mass of each subtree           (nbody x 3)
+    mjtNum*   subtree_com;          // center of mass of each subtree           (nbody x 3)
     mjtNum*   cdof;                 // com-based motion axis of each dof        (nv x 6)
     mjtNum*   cinert;               // com-based body inertia and mass          (nbody x 10)
 
@@ -200,28 +231,28 @@ struct _mjData
     // computed by mj_fwdPosition/mj_makeConstraint
     int*      efc_type;             // constraint type (mjtConstraint)          (njmax x 1)
     int*      efc_id;               // id of object of specified type           (njmax x 1)
-    int*      efc_rownnz;           // number of non-zeros in Jacobian row      (njmax x 1)
-    int*      efc_rowadr;           // row start address in colind array        (njmax x 1)
-    int*      efc_colind;           // column indices in sparse Jacobian        (njmax x nv)
-    int*      efc_rownnz_T;         // number of non-zeros in Jacobian row  T   (nv x 1)
-    int*      efc_rowadr_T;         // row start address in colind array    T   (nv x 1)
-    int*      efc_colind_T;         // column indices in sparse Jacobian    T   (nv x njmax)
+    int*      efc_J_rownnz;         // number of non-zeros in Jacobian row      (njmax x 1)
+    int*      efc_J_rowadr;         // row start address in colind array        (njmax x 1)
+    int*      efc_J_colind;         // column indices in sparse Jacobian        (njmax x nv)
+    int*      efc_JT_rownnz;        // number of non-zeros in Jacobian row  T   (nv x 1)
+    int*      efc_JT_rowadr;        // row start address in colind array    T   (nv x 1)
+    int*      efc_JT_colind;        // column indices in sparse Jacobian    T   (nv x njmax)
     mjtNum*   efc_solref;           // constraint solver reference              (njmax x mjNREF)
     mjtNum*   efc_solimp;           // constraint solver impedance              (njmax x mjNIMP)
     mjtNum*   efc_margin;           // inclusion margin (contact)               (njmax x 1)
     mjtNum*   efc_frictionloss;     // frictionloss (friction)                  (njmax x 1)
     mjtNum*   efc_pos;              // constraint position (equality, contact)  (njmax x 1)
     mjtNum*   efc_J;                // constraint Jacobian                      (njmax x nv)
-    mjtNum*   efc_J_T;              // sparse constraint Jacobian transposed    (nv x njmax)
+    mjtNum*   efc_JT;               // sparse constraint Jacobian transposed    (nv x njmax)
     mjtNum*   efc_diagApprox;       // approximation to diagonal of A           (njmax x 1)
-    mjtNum*   efc_D;                // constraint mass							(njmax x 1)
+    mjtNum*   efc_D;                // constraint mass                          (njmax x 1)
     mjtNum*   efc_R;                // inverse constraint mass                  (njmax x 1)
 
-    // computed by mj_fwdPosition/mj_projectConstraint; DENSE only
+    // computed by mj_fwdPosition/mj_projectConstraint
+    int*      efc_AR_rownnz;        // number of non-zeros in AR                (njmax x 1)
+    int*      efc_AR_rowadr;        // row start address in colind array        (njmax x 1)
+    int*      efc_AR_colind;        // column indices in sparse AR              (njmax x njmax)
     mjtNum*   efc_AR;               // J*inv(M)*J' + R                          (njmax x njmax)
-    mjtNum*   e_ARchol;             // chol(Ae)                                 (nemax x nemax)
-    mjtNum*   fc_e_rect;            // Aie*inv(Ae)                              (njmax x nemax)
-    mjtNum*   fc_AR;                // Ai - Aie*inv(Ae)*Aei                     (njmax x njmax)
 
     //-------------------------------- POSITION, VELOCITY dependent
 
@@ -243,6 +274,10 @@ struct _mjData
     mjtNum*   efc_vel;              // velocity in constraint space: J*qvel     (njmax x 1)
     mjtNum*   efc_aref;             // reference pseudo-acceleration            (njmax x 1)
 
+    // computed by mj_sensorVel
+    mjtNum*   subtree_linvel;       // linear velocity of subtree com           (nbody x 3)
+    mjtNum*   subtree_angmom;       // angular momentum about subtree com       (nbody x 3)
+
     //-------------------------------- POSITION, VELOCITY, CONTROL/ACCELERATION dependent
 
     // computed by mj_fwdActuation
@@ -253,17 +288,18 @@ struct _mjData
     mjtNum*   qfrc_unc;             // net unconstrained force                  (nv x 1)
     mjtNum*   qacc_unc;             // unconstrained acceleration               (nv x 1)
 
-    // computed by mj_fwdConstraint
+    // computed by mj_fwdConstraint/mj_inverse
     mjtNum*   efc_b;                // linear cost term: J*qacc_unc - aref      (njmax x 1)
-    mjtNum*   fc_b;                 // bi - Aie*inv(Ae)*be; DENSE only          (njmax x 1)
     mjtNum*   efc_force;            // constraint force in constraint space     (njmax x 1)
+    int*      efc_state;            // constraint state (mjtConstraintState)    (njmax x 1)
     mjtNum*   qfrc_constraint;      // constraint force                         (nv x 1)
+    mjtNum*   qacc_warmstart;       // acceleration used for warmstart          (nv x 1)
 
     // computed by mj_inverse
     mjtNum*   qfrc_inverse;         // net external force; should equal:        (nv x 1)
                                     //  qfrc_applied + J'*xfrc_applied + qfrc_actuator 
 
-    // computed by mj_sensor/mj_rnePostConstraint; rotation:translation format
+    // computed by mj_sensorAcc/mj_rnePostConstraint; rotation:translation format
     mjtNum*   cacc;                 // com-based acceleration                   (nbody x 6)
     mjtNum*   cfrc_int;             // com-based interaction force with parent  (nbody x 6)
     mjtNum*   cfrc_ext;             // com-based external force on body         (nbody x 6)
@@ -276,15 +312,17 @@ typedef struct _mjData mjData;
 // generic MuJoCo function
 typedef void (*mjfGeneric)(const mjModel* m, mjData* d);
 
+// contact filter: 1- discard, 0- collide
+typedef int (*mjfConFilt)(const mjModel* m, mjData* d, int geom1, int geom2);
+
+// sensor simulation
+typedef void (*mjfSensor)(const mjModel* m, mjData* d, int stage);
+
 // timer
-typedef long long int (*mjfTime)(void);     
+typedef mjtNum (*mjfTime)(void);     
 
 // actuator dynamics, gain, bias
 typedef mjtNum (*mjfAct)(const mjModel* m, const mjData* d, int id);
-
-// magentic flux at global position
-typedef void (*mjfMagnetic)(const mjModel* m, const mjData* d, 
-                            const mjtNum* pos, mjtNum* flux);
 
 // solver impedance
 typedef mjtNum (*mjfSolImp)(const mjModel* m, const mjData* d, int id, 
