@@ -370,7 +370,7 @@ void Test_TRPO_Update(size_t NumThreads)
     return;
 }
 */
-
+/*
 void Test_TRPO_MuJoCo(const int NumIterations, const size_t NumThreads){
 	
     // ArmDOF_0-v0
@@ -399,7 +399,7 @@ void Test_TRPO_MuJoCo(const int NumIterations, const size_t NumThreads){
     
     return;
 }
-
+*/
 void Test_TRPO_Lightweight(const int NumIterations, const size_t NumThreads){
 	
     // ArmDOF_0-v0
@@ -453,8 +453,8 @@ int main() {
     //////////////////// Simulation Based Training ////////////////////
 
     //Test_TRPO_MuJoCo(101, 6);
-    //Test_TRPO_Lightweight(201, 6);
-    TRPO_Video(Param, "Arm200.txt");
+    Test_TRPO_Lightweight(201, 6);
+    //TRPO_Video(Param, "Arm200.txt");
 
     return 0;
 }

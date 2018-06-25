@@ -42,7 +42,7 @@ MAXELEROSDIR_SIM:=$(MAXCOMPILERDIR)/lib/maxeleros-sim
 
 # ---- Source files ----
 ENGINEFILES=$(wildcard ../src/*.maxj) $(wildcard ../src/*/*.maxj)
-CPUFILES:=$(wildcard ../src/*.c ../src/*.cpp)
+CPUFILES:=../src/TRPO_Util.c ../src/lbfgs.c ../src/TRPO_Baseline.c ../src/TRPO_Lightweight.c  ../src/TRPOCpuCode.c
 SIMOBJFILES:=$(patsubst %.c, %.o, $(CPUFILES))
 #DFEOBJFILES:=$(patsubst %.c, %.o, $(CPUFILES))
 
@@ -100,7 +100,7 @@ MAXOS_SIM=$(MAXELEROSDIR_SIM)/lib/libmaxeleros.so
 
 JFLAGS=-cp $(MAXCOMPILERDIR)/lib/MaxCompiler.jar -1.6 -d .
 CFLAGS= $(COMPILER_CFLAGS) $(OPT_FLAGS) -Wall -I../src/include -I${MAXCOMPILERDIR}/include -I${MAXCOMPILERDIR}/include/slic -I${MAXELEROSDIR}/include -D_XOPEN_SOURCE=600
-LFLAGS=-L${MAXCOMPILERDIR}/lib -L${MAXELEROSDIR}/lib ../src/bin/libmujoco131.so ../src/bin/libglfw.so.3  -lmaxeleros -lslic -lm -lpthread
+LFLAGS=-L${MAXCOMPILERDIR}/lib -L${MAXELEROSDIR}/lib -lmaxeleros -lslic -lm -lpthread
 
 # Add this on the command line to pass to make when compiling
 # Useful for debug/optimization flags

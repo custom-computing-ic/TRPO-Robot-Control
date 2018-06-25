@@ -858,7 +858,7 @@ double TRPO_Lightweight (TRPOparam param, const int NumIter, const size_t NumThr
             }
             FrobNorm = sqrt(FrobNorm);
 
-            //printf("CG Iter[%zu] Residual Norm=%.12e, Soln Norm=%.12e\n", it, rdotr, FrobNorm);
+            printf("CG Iter[%zu] Residual Norm=%.12e, Soln Norm=%.12e\n", it, rdotr, FrobNorm);
         
             // Check Termination Condition
             if (rdotr<ResidualTh || it==MaxIter) {
