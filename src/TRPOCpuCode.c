@@ -7,10 +7,11 @@
 
 #include "TRPO.h"
 
-/*
+
 #include "Maxfiles.h"
 #include "MaxSLiCInterface.h"
 
+/*
 void Test_FVP(size_t NumThreads)
 {
 	
@@ -132,7 +133,7 @@ void Test_CG(size_t NumThreads)
     
     return;
 }
-
+*/
 
 void Test_FVP_FPGA() {
 
@@ -220,7 +221,7 @@ void Test_FVP_FPGA() {
     return;
 
 }
-
+/*
 void Test_CG_FPGA(size_t NumThreads)
 {
 
@@ -447,13 +448,13 @@ int main() {
 
     //////////////////// FPGA ////////////////////
 
-//    Test_FVP_FPGA();
+    Test_FVP_FPGA();
 //    Test_CG_FPGA(6);
 
     //////////////////// Simulation Based Training ////////////////////
 
     //Test_TRPO_MuJoCo(101, 6);
-    Test_TRPO_Lightweight(201, 6);
+    //Test_TRPO_Lightweight(1, 6);
     //TRPO_Video(Param, "Arm200.txt");
 
     return 0;

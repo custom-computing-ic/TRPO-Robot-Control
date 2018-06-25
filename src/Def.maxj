@@ -18,6 +18,9 @@ class Def {
     public static final char [] AcFunc    = {'l', 't', 't', 'l'};
     public static final int  [] LayerSize = { 16, 16, 16, 4};
     public static final int  [] NumBlocks = {  4,  4,  4, 2};
+    
+    // Action Space Dimension
+    public static final int ActionSpaceDim = 3;
 
 
     ///////////////////////// FPGA Settings /////////////////////////

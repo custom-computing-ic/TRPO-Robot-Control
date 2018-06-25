@@ -34,11 +34,13 @@ class CPP extends KernelLib{
     private DFEVar EnBiasStdInput;
     private DFEVar FVPResult;
     private DFEVar FVPResultValid;
+    private DFEVar beginFwdProp_forDebug;
     
     public DFEVar getEnObservationInput()       {return EnObservationInput;}
     public DFEVar getEnBiasStdInput()           {return EnBiasStdInput;}
     public DFEVar getFVPResult()                {return FVPResult;}
     public DFEVar isFVPResultValid()            {return FVPResultValid;}
+    public DFEVar getbeginFwdProp_forDebug()    {return beginFwdProp_forDebug;}
 
 
     CPP(  KernelLib owner,
@@ -470,6 +472,8 @@ class CPP extends KernelLib{
 
 
     /////////////////////// Debug ///////////////////////
+
+    beginFwdProp_forDebug = beginFwdProp;
 
 /*
     // Tick

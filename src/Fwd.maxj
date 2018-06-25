@@ -1,0 +1,322 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
+
+import java.lang.Math;
+
+/**
+ * Ordinary Forward Propagation: Multiple OddLayer and EvenLayer instances connected together to compute FP.
+ *
+ * @author Patrick Shao
+ *
+ * @param <NumLayers> Number of layers in the network: [Input] --> [Hidden 1] --> [Hidden 2] --> [Output] is 4 layers.
+ * @param <LayerSize> Padded Layer Size of each layer in the network
+ * @param <NumBlocks> Parallelism Factor in each layer, the vector of that layer's width will be NumBlocks
+ * @param <AcFunc> Activation Function of each layer, note that AcFunc[0] is not used as Observation is given
+ * @param <Observation> Input to the first layer (observation data)
+ *                      Note: During Initialisation, Observation is used to stream W and VW for each layer
+ * @param <BiasInitData> Initialisation Data for Bias
+ * @param <beginInit> begin initialisation. Weight initialisation and bias initialisation happen concurrently.
+ *
+ */
+
+
+class Fwd extends KernelLib{
+
+    private DFEVar EnObservationInput;
+    private DFEVar EnBiasStdInput;
+    private DFEVector<DFEVar> Mean;
+    private DFEVar MeanValid;
+    
+    public DFEVar getEnObservationInput()  {return EnObservationInput;}
+    public DFEVar getEnBiasStdInput()      {return EnBiasStdInput;}
+    public DFEVector<DFEVar> getMean()     {return Mean;}
+    public DFEVar isMeanValid()            {return MeanValid;}
+
+
+    Fwd(  KernelLib owner,
+          int NumLayers,
+          int [] LayerSize,
+          int [] NumBlocks,
+          char [] AcFunc,
+          DFEVector<DFEVar> Observation,
+          DFEVar BiasInitData,
+          DFEVar beginInit,
+          DFEVar beginFwdProp)
+    {
+
+    super(owner);
+    
+    /////////////////////// Parameters ///////////////////////
+    
+    // Argument Check - currently we assume 4 layers:
+    // e.g. [Input] --> [Hidden 1] --> [Hidden 2] --> [Output] is 4 layers.    
+    if (NumLayers!=4) {
+        throw new IllegalArgumentException("[ERROR] Currently we assume 4 layers.");
+    }
+    if ((LayerSize.length!=NumLayers)||(AcFunc.length!=NumLayers)||(NumBlocks.length!=NumLayers)) {
+        throw new IllegalArgumentException("[ERROR] Length of LayerSize, AcFunc and numBlocks must be NumLayers.");
+    }
+    
+    // Buffer Depth
+    int BufferDepth = Def.BufferDepth;
+
+    // Calculate BlockDim
+    int [] BlockDim = new int[NumLayers];
+    for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
+
+    // Number of Cycles needed for Forward or Back Propagation for one sample
+    // IMPORTANT: By default we assume max(BlockDim[0], BlockDim[2])>=Computation Latency
+    if (BlockDim[0]<BlockDim[2]) {
+        System.out.println("[Warning] BlockDim[0] = "+BlockDim[0]+", BlockDim[2]="+BlockDim[2]+".");
+        System.out.println("[Warning] Better efficiency is achieved when BlockDim[0] >= BlockDim[2].");
+        System.out.println("[Warning] Consider changing NumBlocks[] settings to make BlockDim[0] >= BlockDim[2].");
+    }
+    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+    int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    int PropCyclesPerSample    = FwdPropCyclesPerSample;
+
+
+    /////////////////////// Types ///////////////////////
+
+    // Type of each layer
+    DFEVectorType<DFEVar> Y0_Type = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[0]);
+    DFEVectorType<DFEVar> Y1_Type = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[1]);
+    DFEVectorType<DFEVar> Y2_Type = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[2]);
+
+    // Type of Mean Vector
+    DFEVectorType<DFEVar> Mean_Type = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
+
+
+    /////////////////////// Total Counter ///////////////////////
+
+    // Total Counter
+    Count.Params TotalCounterParam = control.count.makeParams(32)
+                                                  .withInitValue(0)
+                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
+                                                  .withReset(beginInit);
+    Counter TotalCounter = control.count.makeCounter(TotalCounterParam);
+    DFEVar TotalCount = TotalCounter.getCount();
+
+
+    /////////////////////// Control - Weight Initialisation ///////////////////////
+    
+    // Parameters
+    int FstLayerWeightInitCycles = BlockDim[0] * LayerSize[1];
+    int SndLayerWeightInitCycles = BlockDim[1] * LayerSize[2];
+    int TrdLayerWeightInitCycles = BlockDim[2] * LayerSize[3];
+    int WeightInitCycles = FstLayerWeightInitCycles + SndLayerWeightInitCycles + TrdLayerWeightInitCycles;
+    
+    // Weight Initialisation Counter
+    DFEVar beginWeightInit = beginInit;
+    AddrGenerator WeightInitCounter = new AddrGenerator(this, 1, WeightInitCycles, beginWeightInit);
+    DFEVar    WeightInitCount = WeightInitCounter.getAddr();
+    DFEVar isWeightInitiating = WeightInitCounter.isValid();
+    
+    // Control Signals for Each Layer
+    DFEVar beginWeightInitFstLayer = isWeightInitiating & (WeightInitCount === 0);
+    DFEVar beginWeightInitSndLayer = isWeightInitiating & (WeightInitCount === FstLayerWeightInitCycles);
+    DFEVar beginWeightInitTrdLayer = isWeightInitiating & (WeightInitCount === FstLayerWeightInitCycles + SndLayerWeightInitCycles);
+
+    // Weight Initialisation Signal - Selection Signal to be used in MUX
+    DFEVar isFstLayerWeightInitiating = isWeightInitiating & (WeightInitCount  < FstLayerWeightInitCycles);
+    DFEVar isSndLayerWeightInitiating = isWeightInitiating & (WeightInitCount >= FstLayerWeightInitCycles) & 
+                                        (WeightInitCount < FstLayerWeightInitCycles + SndLayerWeightInitCycles);
+    DFEVar isTrdLayerWeightInitiating = isWeightInitiating & (WeightInitCount >= FstLayerWeightInitCycles + SndLayerWeightInitCycles);
+
+
+    /////////////////////// Control - Bias Initialisation ///////////////////////
+
+    // Parameters
+    int FstLayerBiasInitCycles = LayerSize[1];
+    int SndLayerBiasInitCycles = LayerSize[2];
+    int TrdLayerBiasInitCycles = LayerSize[3];
+    int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles;
+    
+    // Bias Initialisation Counter
+    DFEVar beginBiasStdInit = beginInit;
+    AddrGenerator BiasStdInitCounter = new AddrGenerator(this, 1, BiasStdInitCycles, beginBiasStdInit);
+    DFEVar    BiasStdInitCount = BiasStdInitCounter.getAddr();
+    DFEVar isBiasStdInitiating = BiasStdInitCounter.isValid();
+    
+    // Control Signals for Each Layer
+    DFEVar beginBiasInitFstLayer = isBiasStdInitiating & (BiasStdInitCount === 0);
+    DFEVar beginBiasInitSndLayer = isBiasStdInitiating & (BiasStdInitCount === FstLayerBiasInitCycles);
+    DFEVar beginBiasInitTrdLayer = isBiasStdInitiating & (BiasStdInitCount === FstLayerBiasInitCycles + SndLayerBiasInitCycles);
+
+
+    /////////////////////// Control - Forward Propagation ///////////////////////
+
+    // Inner Loop - Counting the Forward Propagation of a sample
+    // Note: When this counter wraps, it means the system is ready to forward propagation a new sample
+    //       The back propagation of the current sample is carried out during the forward propagation of the new sample
+    Count.Params InnerLoopCounterParam = control.count.makeParams(MathUtils.bitsToAddress(PropCyclesPerSample))
+                                                  .withInitValue(0)
+                                                  .withMax(PropCyclesPerSample)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginFwdProp);
+    Counter InnerLoopCounter = control.count.makeCounter(InnerLoopCounterParam);
+    DFEVar InnerLoopCount = InnerLoopCounter.getCount();
+
+    // Outer Loop - Counting the number of samples processed
+    Count.Params OuterLoopCounterParam = control.count.makeParams(32)
+                                                  .withInitValue(0)
+                                                  .withEnable(InnerLoopCounter.getWrap())
+                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
+                                                  .withReset(beginFwdProp);
+    Counter OuterLoopCounter = control.count.makeCounter(OuterLoopCounterParam);
+    DFEVar OuterLoopCount = OuterLoopCounter.getCount();
+
+    // Buffer Read and Write Row Address - Swapping Row 0 and Row 1
+    Count.Params FwdBufRowAddrCounterParam = control.count.makeParams(2)
+                                                  .withInitValue(0)
+                                                  .withMax(2)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withEnable(InnerLoopCounter.getWrap())
+                                                  .withReset(beginFwdProp);
+    Counter FwdBufRowAddrCounter = control.count.makeCounter(FwdBufRowAddrCounterParam);
+    DFEVar FwdBufRowAddrCount = FwdBufRowAddrCounter.getCount();
+    DFEVar FwdBufRowAddr = FwdBufRowAddrCount.cast(dfeUInt(1));
+    DFEVar BwdBufRowAddr = ~FwdBufRowAddr;
+   
+    // Input Control Signal for Observation
+    AddrGenerator NewSampleInputCounter = new AddrGenerator(this, 1, BlockDim[0], beginFwdProp);
+    DFEVar isStreamingNewSample = NewSampleInputCounter.isValid();    
+    EnObservationInput = isWeightInitiating | isStreamingNewSample;
+
+    // Input Control Signal for BiasInitData
+    EnBiasStdInput = isBiasStdInitiating;
+
+
+    /////////////////////// Input Buffer /////////////////////// 
+
+    // Buffering Observation (y_0) for Forward Propagation and Backward Propagation.
+    // In this buffer R/W Port is used for Forward Propagation (Read Address is automatically generated inside)
+    // R Port is used for Back Propagation (Need to supply Read Address externally.)
+    DFEVar Buffer0WriteAddrRow         = FwdBufRowAddr;
+    DFEVar Buffer0beginWrFwdData       = beginFwdProp;
+    DFEVar Buffer0BwdReadAddrRow       = BwdBufRowAddr;
+    DFEVar Buffer0BwdOffsetReadAddrCol = constant.var(dfeUInt(Math.max(MathUtils.bitsToAddress(BlockDim[0]),1)), 0);
+
+    InputBuffer Buffer0 = new InputBuffer(this, BlockDim[0], NumBlocks[0], BufferDepth, Observation, 
+                              Buffer0WriteAddrRow, Buffer0beginWrFwdData, Buffer0BwdReadAddrRow, Buffer0BwdOffsetReadAddrCol);
+    DFEVector<DFEVar>  y_0 = Buffer0.getFwdData(); 
+
+
+    /////////////////////// First Layer ///////////////////////
+
+    // First Layer: Layer[0] => Layer[1]
+    DFEVar beginFwdPropFst = beginFwdProp;
+    DFEVector<DFEVar> y_0_in = Y0_Type.newInstance(this);
+    for (int i=0; i<NumBlocks[0]; ++i) {
+        y_0_in[i] <== isFstLayerWeightInitiating ? Observation[i] : y_0[i];
+    }
+
+    OddFwdLayer FstLayer = new OddFwdLayer(this, 0, AcFunc[1], BlockDim[0], NumBlocks[0], BlockDim[1], NumBlocks[1],
+                                     y_0_in, BiasInitData, beginWeightInitFstLayer, beginBiasInitFstLayer, beginFwdPropFst);
+    
+    // Outputs for Forward Propagation
+    DFEVector<DFEVar>  y_1_toBuffer = FstLayer.getY();
+    DFEVar FstLayerOutputValid      = FstLayer.isFwdValid();
+    DFEVar FstLayerFirstResultReady = FstLayer.isFwdFirstItemReady();
+
+    
+    // Layer Buffer FwdBuf1: Buffering y_1 and Ry_1
+    DFEVar FwdBuf1WriteAddrRow         = FwdBufRowAddr;
+    DFEVar FwdBuf1beginWrFwdData       = FstLayerFirstResultReady;
+    DFEVar FwdBuf1isFwdDataInValid     = FstLayerOutputValid;
+    DFEVar FwdBuf1FwdReadAddrRow       = FwdBufRowAddr;
+    DFEVar FwdBuf1FwdOffsetReadAddrCol = dfeUInt(Math.max(MathUtils.bitsToAddress(BlockDim[1]),1)).newInstance(this);
+    
+    FwdLayerBuffer FwdBuf1 = new FwdLayerBuffer(this, 1, BlockDim[1], NumBlocks[1], BlockDim[1], NumBlocks[1], BufferDepth, 
+                                          y_1_toBuffer, FwdBuf1WriteAddrRow, FwdBuf1beginWrFwdData, 
+                                          FwdBuf1isFwdDataInValid, FwdBuf1FwdReadAddrRow, FwdBuf1FwdOffsetReadAddrCol);
+    DFEVector<DFEVar> y_1 = FwdBuf1.getFwdY();
+
+
+    /////////////////////// Second Layer ///////////////////////
+
+    // Second Layer: Layer[1] => Layer[2]
+    // Remarks: Fwd_Snd_CycleTime = max(BlockDim[0], BlockDim[2], CompLatency) 
+    int Fwd_Snd_CycleTime = Math.max(BlockDim[0], BlockDim[2]);
+    DFEVar beginFwdPropSnd = FstLayerFirstResultReady;
+    DFEVector<DFEVar> y_1_in = Y1_Type.newInstance(this);
+    for (int i=0; i<NumBlocks[1]; ++i) {
+        y_1_in[i] <== isSndLayerWeightInitiating ? Observation[i] : y_1[i];
+    }
+
+    EvenFwdLayer SndLayer = new EvenFwdLayer(this, 1, AcFunc[2], BlockDim[1], NumBlocks[1], BlockDim[2], NumBlocks[2], Fwd_Snd_CycleTime,
+                                           y_1_in, BiasInitData, beginWeightInitSndLayer, beginBiasInitSndLayer, beginFwdPropSnd);
+
+    // Outputs for Forward Propagation
+    DFEVector<DFEVar>  y_2_toBuffer = SndLayer.getY();
+    DFEVar SndLayerOutputValid      = SndLayer.isFwdValid();
+    DFEVar SndLayerFirstResultReady = SndLayer.isFwdFirstItemReady();
+    FwdBuf1FwdOffsetReadAddrCol <== SndLayer.getFwdInputReadOffsetAddr();
+
+
+    // Layer Buffer FwdBuf2: Buffering y_2 and Ry_2
+    DFEVar FwdBuf2WriteAddrRow         = FwdBufRowAddr;
+    DFEVar FwdBuf2beginWrFwdData       = SndLayerFirstResultReady;
+    DFEVar FwdBuf2isFwdDataInValid     = SndLayerOutputValid;
+    DFEVar FwdBuf2FwdReadAddrRow       = FwdBufRowAddr;
+    DFEVar FwdBuf2FwdOffsetReadAddrCol = dfeUInt(Math.max(MathUtils.bitsToAddress(BlockDim[2]),1)).newInstance(this);
+    
+    FwdLayerBuffer FwdBuf2 = new FwdLayerBuffer(this, 2, BlockDim[2], NumBlocks[2], BlockDim[2], NumBlocks[2], BufferDepth, 
+                                          y_2_toBuffer, FwdBuf2WriteAddrRow, FwdBuf2beginWrFwdData, 
+                                          FwdBuf2isFwdDataInValid, FwdBuf2FwdReadAddrRow, FwdBuf2FwdOffsetReadAddrCol);
+    DFEVector<DFEVar> y_2 = FwdBuf2.getFwdY();
+
+
+    /////////////////////// Third Layer ///////////////////////
+
+    // Third Layer: Layer[2] => Layer[3]
+    DFEVar beginFwdPropTrd = SndLayerFirstResultReady;
+    DFEVector<DFEVar> y_2_in = Y2_Type.newInstance(this);
+    for (int i=0; i<NumBlocks[2]; ++i) {
+        y_2_in[i] <== isTrdLayerWeightInitiating ? Observation[i] : y_2[i];
+    }
+    
+    OddFwdLayer TrdLayer = new OddFwdLayer(this, 2, AcFunc[3], BlockDim[2], NumBlocks[2], BlockDim[3], NumBlocks[3], 
+                                     y_2_in, BiasInitData, beginWeightInitTrdLayer, beginBiasInitTrdLayer, beginFwdPropTrd);
+
+    // Outputs for Forward Propagation
+    DFEVector<DFEVar>  y_3_toBuffer = TrdLayer.getY();
+    DFEVar TrdLayerOutputValid      = TrdLayer.isFwdValid();
+    DFEVar TrdLayerFirstResultReady = TrdLayer.isFwdFirstItemReady();
+    FwdBuf2FwdOffsetReadAddrCol <== TrdLayer.getFwdInputReadOffsetAddr();
+
+
+    /////////////////////// Buffering Mean ///////////////////////
+    
+    Mean = Mean_Type.newInstance(this);
+    DFEVar Mean01EnWrite =  TrdLayerFirstResultReady & TrdLayerOutputValid;
+    DFEVar Mean2EnWrite  = ~TrdLayerFirstResultReady & TrdLayerOutputValid;
+    Mean[0] <== Reductions.streamHold(y_3_toBuffer[0], Mean01EnWrite);
+    Mean[1] <== Reductions.streamHold(y_3_toBuffer[0], Mean2EnWrite);
+    Mean[2] <== Reductions.streamHold(y_3_toBuffer[1], Mean01EnWrite);
+
+    MeanValid = Mean2EnWrite;
+
+
+    /////////////////////// Debug ///////////////////////
+
+
+    // Tick
+    DFEVar Tick = control.count.simpleCounter(32);
+
+    debug.simPrintf(beginInit,     "[%4d] Begin Initialisation...\n", Tick);
+    debug.simPrintf(beginFwdProp,  "[%4d] ---- Begin Fwd Prop Sample [%d] ------------------------------------\n", Tick, OuterLoopCount);
+    debug.simPrintf(TrdLayer.isFwdFirstItemReady(), "[%4d] First Third Layer Forward Propagation Output is ready.\n", Tick);
+    debug.simPrintf(TrdLayer.isFwdValid(), "[%4d] y=(%f, %f) => Mean=(%f, %f, %f)\n", Tick, y_3_toBuffer[0], y_3_toBuffer[1], Mean[0], Mean[1], Mean[2]);
+
+
+
+    }
+}
