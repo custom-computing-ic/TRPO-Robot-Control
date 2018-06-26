@@ -34,13 +34,11 @@ class CPP extends KernelLib{
     private DFEVar EnBiasStdInput;
     private DFEVar FVPResult;
     private DFEVar FVPResultValid;
-    private DFEVar beginFwdProp_forDebug;
     
     public DFEVar getEnObservationInput()       {return EnObservationInput;}
     public DFEVar getEnBiasStdInput()           {return EnBiasStdInput;}
     public DFEVar getFVPResult()                {return FVPResult;}
     public DFEVar isFVPResultValid()            {return FVPResultValid;}
-    public DFEVar getbeginFwdProp_forDebug()    {return beginFwdProp_forDebug;}
 
 
     CPP(  KernelLib owner,
@@ -472,9 +470,6 @@ class CPP extends KernelLib{
 
 
     /////////////////////// Debug ///////////////////////
-
-    beginFwdProp_forDebug = beginFwdProp;
-
 /*
     // Tick
     DFEVar Tick = control.count.simpleCounter(32);
@@ -484,10 +479,10 @@ class CPP extends KernelLib{
     debug.simPrintf(beginFwdProp,  "[%4d] ---- Begin Fwd Prop Sample [%d] ------------------------------------\n", Tick, OuterLoopCount);
     debug.simPrintf(beginBwdProp,  "[%4d] ------------------------------------ Begin Bwd Prop Sample [%d] ----\n", Tick, OuterLoopCount-1);
     debug.simPrintf(beginReadBack, "[%4d] Begin Reading Back FVP Results...\n", Tick);
-*/    
-//    debug.simPrintf(TrdLayer.isFwdFirstItemReady(), "[%4d] First Third Layer Forward Propagation Output is ready.\n", Tick);
-//    debug.simPrintf(TrdLayer.isFwdValid(), "[%4d] y[0:3]=(%.12f, %.12f, %.12f, %.12f), Ry[0:3]=(%.12f, %.12f, %.12f, %.12f)\n", Tick, y_3_toBuffer[0], y_3_toBuffer[1], y_3_toBuffer[2], y_3_toBuffer[3], Ry_3_toBuffer[0], Ry_3_toBuffer[1], Ry_3_toBuffer[2], Ry_3_toBuffer[3]);
     
+    debug.simPrintf(TrdLayer.isFwdFirstItemReady(), "[%4d] CPP First Third Layer Forward Propagation Output is ready.\n", Tick);
+    debug.simPrintf(TrdLayer.isFwdValid(), "[%4d] CPP y[0:1]=(%.12f, %.12f), Ry[0:1]=(%.12f, %.12f)\n", Tick, y_3_toBuffer[0], y_3_toBuffer[1], Ry_3_toBuffer[0], Ry_3_toBuffer[1]);
+*/
     
     // Back Propagation Results
 //    debug.simPrintf(beginBwdPropTrd, "[%4d] Begin Third Layer Back Propagation...\n", Tick);

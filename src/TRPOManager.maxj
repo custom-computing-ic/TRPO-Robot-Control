@@ -17,8 +17,8 @@ import java.lang.Math;
 
 public class TRPOManager extends CustomManager{
 
-    private static final String Name = "TRPOKernel";
-
+    private static final String TRPOKernel_Name = "TRPOKernel";
+    private static final String LightweightKernel_Name = "LightweightKernel";
 
     TRPOManager(EngineParameters ep)
     {
@@ -59,13 +59,77 @@ public class TRPOManager extends CustomManager{
         li.addStreamToLMem("toDRAM", LMemCommandGroup.MemoryAccessPattern.LINEAR_1D) <== addStreamFromCPU("fromCPU");
 
 
-        ///////////////////////// Kernel /////////////////////////
+        ///////////////////////// TRPO Kernel /////////////////////////
 
-        KernelBlock k = addKernel(new TRPOKernel(makeKernelParameters(Name)));
-        k.getInput("Observation") <== li.addStreamFromLMem("fromDRAM", LMemCommandGroup.MemoryAccessPattern.LINEAR_1D);
-        k.getInput("BiasStd")     <== addStreamFromCPU("BiasStd");
-        addStreamToCPU("FVP")     <== k.getOutput("FVP");
+        KernelBlock TKernel = addKernel(new TRPOKernel(makeKernelParameters(TRPOKernel_Name)));
+        TKernel.getInput("Observation") <== li.addStreamFromLMem("fromDRAM", LMemCommandGroup.MemoryAccessPattern.LINEAR_1D);
+        TKernel.getInput("BiasStd")     <== addStreamFromCPU("BiasStd");
+        addStreamToCPU("FVP")           <== TKernel.getOutput("FVP");
+
+
+        ///////////////////////// Lightweight Kernel /////////////////////////
+
+        KernelBlock LKernel = addKernel(new LightweightKernel(makeKernelParameters(LightweightKernel_Name)));
+        LKernel.getInput("WeightInit")  <== addStreamFromCPU("WeightInit");
+        LKernel.getInput("BiasStdInit") <== addStreamFromCPU("BiasStdInit");
+        addStreamToCPU("Reward")        <== LKernel.getOutput("Reward");
+
     }
+
+
+    private static EngineInterface RunLightweight() {
+
+        EngineInterface ei = new EngineInterface("RunLightweight");
+
+        ///////////////////////// Parameters /////////////////////////
+
+        int NumLayers    = Def.NumLayers;
+        int [] LayerSize = Def.LayerSize;
+        int [] NumBlocks = Def.NumBlocks;
+        int [] BlockDim  = new int[Def.NumLayers];
+        for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
+
+
+        ///////////////////////// Inputs /////////////////////////
+
+        // WeightInit Vector
+        int WeightInitVecLength = 0;
+        for (int i=0; i<NumLayers-1; ++i) {
+            WeightInitVecLength += BlockDim[i] * LayerSize[i+1];
+        }
+        int WeightInitVecWidth = NumBlocks[0];
+        int WeightInitVecSize = CPUTypes.DOUBLE.sizeInBytes() * WeightInitVecLength * WeightInitVecWidth;
+        ei.setStream("WeightInit", CPUTypes.DOUBLE, WeightInitVecSize);
+
+        // BiasStdInit Stream
+        int BiasStdVecLength = LayerSize[NumLayers-1];
+        for (int i=1; i<NumLayers; ++i) {
+            BiasStdVecLength += LayerSize[i];
+        }
+        int BiasStdSize = CPUTypes.DOUBLE.sizeInBytes() * BiasStdVecLength;
+        ei.setStream("BiasStdInit", CPUTypes.DOUBLE, BiasStdSize);
+
+
+        ///////////////////////// Outputs /////////////////////////
+
+        // Reward
+        ei.setStream("Reward", CPUTypes.DOUBLE, CPUTypes.DOUBLE.sizeInBytes()*Def.NumSamples);
+
+
+        ///////////////////////// Ticks /////////////////////////
+
+        // Number of Ticks
+        // TODO How many additional cycles for Simulator? currently 10
+        int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+        int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3] + 10;
+        int FwdPropCycles = FwdPropCyclesPerSample * Def.NumSamples / Def.NumLightweightSimulators;
+        int NumTicks = WeightInitVecLength + FwdPropCycles + 4;
+        ei.setTicks(LightweightKernel_Name, NumTicks);
+
+        ei.ignoreAll(Direction.IN_OUT);
+        return ei;
+    }
+
 
     private static EngineInterface WriteDRAM() {
 
@@ -97,7 +161,7 @@ public class TRPOManager extends CustomManager{
 
         // NumSamples
         InterfaceParam NumSamples = ei.addParam("NumSamples", CPUTypes.UINT32);
-        ei.setScalar(Name, "NumSamples", NumSamples);
+        ei.setScalar(TRPOKernel_Name, "NumSamples", NumSamples);
         
         // Length of Weight and VWeight Initialisation Vector
         int WeightInitVecLength = 0;
@@ -140,7 +204,7 @@ public class TRPOManager extends CustomManager{
         int BwdPropCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
         int PropCyclesPerSample    = Math.max(FwdPropCyclesPerSample, BwdPropCyclesPerSample);
         InterfaceParam NumTicks = WeightInitVecLength + PropCyclesPerSample*(NumSamples+1) + PaddedFVPLength + 20;
-        ei.setTicks(Name, NumTicks);
+        ei.setTicks(TRPOKernel_Name, NumTicks);
 
         ei.ignoreAll(Direction.IN_OUT);
         return ei;
@@ -152,6 +216,7 @@ public class TRPOManager extends CustomManager{
         TRPOManager manager = new TRPOManager(new EngineParameters(args));
         manager.createSLiCinterface(WriteDRAM());
         manager.createSLiCinterface(RunTRPO());
+        manager.createSLiCinterface(RunLightweight());
         manager.suppressDefaultInterface();
         manager.build();
     }

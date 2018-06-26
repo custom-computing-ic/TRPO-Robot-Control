@@ -1,0 +1,129 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.Kernel;
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
+
+
+class LightweightKernel extends Kernel {
+
+    LightweightKernel(KernelParameters parameters)
+    
+    {
+    
+    super(parameters);
+
+    /////////////////////// Parameters ///////////////////////
+    
+    // Note: LayerSize here should be padded number
+    int NumLayers     = Def.NumLayers;
+    int  [] LayerSize = Def.LayerSize;
+    int  [] NumBlocks = Def.NumBlocks;
+    char [] AcFunc    = Def.AcFunc;
+
+    // Vector Types
+    DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.InputType, NumBlocks[0]);
+    DFEVectorType<DFEVar> ObVecType = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[0]);
+
+    // Calculate BlockDim
+    int [] BlockDim = new int[NumLayers];
+    for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
+    
+    // Number of Cycles for Weight Initialisation
+    int FstLayerWeightInitCycles = BlockDim[0] * LayerSize[1];
+    int SndLayerWeightInitCycles = BlockDim[1] * LayerSize[2];
+    int TrdLayerWeightInitCycles = BlockDim[2] * LayerSize[3];
+    int WeightInitCycles = FstLayerWeightInitCycles + SndLayerWeightInitCycles + TrdLayerWeightInitCycles;    
+
+    // Number of Cycles for Each Round of Simulation (Forward Propagation + 10)
+    // TODO 10 is also used in the Manager, must be consistent
+    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+    int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    int SimulationCyclesPerSample = FwdPropCyclesPerSample + 10;
+
+    // Total Simulation Time
+    int NumSimulationRounds = Def.NumSamples / Def.NumLightweightSimulators;
+    int NumSimulationCycles = NumSimulationRounds * SimulationCyclesPerSample;
+    
+   
+    /////////////////////// Control ///////////////////////
+    
+    // TODO Time-Multiplexing of Multiple Lightweight Simulators
+    
+    // Overall Control
+    DFEVar Tick = control.count.simpleCounter(32);
+    DFEVar beginInit       = (Tick === 1);
+    DFEVar beginSimulation = (Tick === WeightInitCycles);
+
+    // Total Cycles of Lightweight Simulation
+    AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, NumSimulationCycles, beginSimulation);
+    DFEVar isSimulating = LightweightSimulationCounter.isValid();
+
+    // Inner Loop - Counting the Simulation of a sample
+    // Note: When this counter wraps, it means the system is ready to simulate another sample
+    Count.Params InnerLoopCounterParam = control.count.makeParams(16)
+                                                  .withInitValue(0)
+                                                  .withMax(SimulationCyclesPerSample)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginSimulation);
+    Counter InnerLoopCounter = control.count.makeCounter(InnerLoopCounterParam);
+    DFEVar InnerLoopCount = InnerLoopCounter.getCount();
+
+    // Outer Loop - Counting the number of Simulation Rounds
+    Count.Params OuterLoopCounterParam = control.count.makeParams(16)
+                                                  .withInitValue(0)
+                                                  .withEnable(InnerLoopCounter.getWrap())
+                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
+                                                  .withReset(beginSimulation);
+    Counter OuterLoopCounter = control.count.makeCounter(OuterLoopCounterParam);
+    DFEVar OuterLoopCount = OuterLoopCounter.getCount();
+
+    // Forward Propagation Control
+    DFEVar beginFwdProp = isSimulating & (InnerLoopCount === 0);
+
+
+    /////////////////////// Input ///////////////////////
+    
+    // Weight Input to Kernel - cast to fix point
+    DFEVar EnWeightInput = dfeUInt(1).newInstance(this);
+    DFEVector<DFEVar> InVec = io.input("WeightInit", InVecType, EnWeightInput);
+    DFEVector<DFEVar> WeightInitData = InVec.cast(ObVecType);
+
+    // Bias and Std Input to Kernel - cast to fix point
+    DFEVar EnBiasStdInput  = dfeUInt(1).newInstance(this);
+    DFEVar InBiasStd       = io.input("BiasStdInit", Def.InputType, EnBiasStdInput);
+    DFEVar BiasStdInitData = InBiasStd.cast(Def.DataType);
+
+
+    /////////////////////// Forward Propagation ///////////////////////
+
+    // TODO Observation
+    DFEVector<DFEVar> Observation = ObVecType.newInstance(this);
+    for(int i=0; i<NumBlocks[0]; ++i) {
+        Observation[i] <== 0.1 * (OuterLoopCount+1).cast(Def.DataType);
+    }
+
+    // Forward Propagation
+    Fwd FwdCalc = new Fwd(this, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
+    EnWeightInput  <== FwdCalc.getEnWeightInput();
+    EnBiasStdInput <== FwdCalc.getEnBiasStdInput();
+    DFEVector<DFEVar> Mean = FwdCalc.getMean();
+    DFEVector<DFEVar> Std  = FwdCalc.getStd();
+    DFEVar isMeanValid = FwdCalc.isMeanValid();
+
+
+    /////////////////////// Output ///////////////////////
+    
+    // TODO Calculate Reward
+    // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
+    DFEVar RewardData = Tick;
+    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isMeanValid);
+
+    debug.simPrintf(isMeanValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
+
+    }
+
+}

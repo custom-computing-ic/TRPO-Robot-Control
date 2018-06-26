@@ -430,6 +430,39 @@ void Test_TRPO_Lightweight(const int NumIterations, const size_t NumThreads){
     return;
 }
 
+void Test_TRPO_Lightweight_FPGA (const int NumIterations, const size_t NumThreads){
+
+    // ArmDOF_0-v0
+    char            AcFunc [] = {'l', 't', 't', 'l'};
+    size_t       LayerSize [] = { 15, 16, 16, 3};
+    size_t PaddedLayerSize [] = { 16, 16, 16, 4};
+    size_t       NumBlocks [] = {  4,  4,  4, 2};
+    char * ModelFileName      = "ArmTestModel.txt";
+    char * BaselineFileName   = "ArmTestBaseline.txt";
+    char * ResultFileName     = "ArmTrainingResult";
+
+    TRPOparam Param;
+    Param.ModelFile       = ModelFileName;
+    Param.BaselineFile    = BaselineFileName;
+    Param.ResultFile      = ResultFileName;
+    Param.NumLayers       = 4;
+    Param.AcFunc          = AcFunc;
+    Param.LayerSize       = LayerSize;
+    Param.PaddedLayerSize = PaddedLayerSize;
+    Param.NumBlocks       = NumBlocks;
+    Param.CG_Damping      = 0.1;
+
+
+    printf("----------------------- Run TRPO Training (%zu Threads) ------------------------\n", NumThreads);
+    double compTime = TRPO_Lightweight_FPGA (Param, NumIterations, NumThreads);
+    if (compTime<0) fprintf(stderr, "[ERROR] TRPO Update Failed.\n");
+    printf("\n[INFO] CPU TRPO Training Time = %f seconds\n", compTime);
+    printf("---------------------------------------------------------------------\n\n");
+
+    return;
+}
+
+
 int main() {
 
     // ArmDOF_0-v0
@@ -448,8 +481,9 @@ int main() {
 
     //////////////////// FPGA ////////////////////
 
-    Test_FVP_FPGA();
+//    Test_FVP_FPGA();
 //    Test_CG_FPGA(6);
+    Test_TRPO_Lightweight_FPGA(1, 6);
 
     //////////////////// Simulation Based Training ////////////////////
 

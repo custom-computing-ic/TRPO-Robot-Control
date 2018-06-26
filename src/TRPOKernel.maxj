@@ -65,16 +65,6 @@ class TRPOKernel extends Kernel {
     // Output FVP Result
     io.output("FVP", FVPResult.cast(Def.InputType), Def.InputType, FVPValid);
 
-
-    /////////////////////// Debugging ///////////////////////
-
-    DFEVar beginFwd = FVPCalc.getbeginFwdProp_forDebug();
-    Fwd FwdCalc = new Fwd(this, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, BiasStdInitData, beginFVP, beginFwd);
-    DFEVector<DFEVar> Mean = FwdCalc.getMean();
-    DFEVar isMeanValid = FwdCalc.isMeanValid();
-
-    debug.simPrintf(isMeanValid, "[%4d] Mean Output = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2]);
-
     }
 
 }

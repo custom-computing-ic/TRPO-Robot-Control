@@ -368,7 +368,7 @@ double FVP_FPGA (TRPOparam param, double *Result, double *Input){
     
     // Free Engine and Maxfile
     max_unload(engine);
-    TRPO_free();    
+    TRPO_free();
 
     // Read FVP into Result
     pos = 0;

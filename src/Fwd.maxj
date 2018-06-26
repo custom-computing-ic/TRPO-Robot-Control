@@ -21,7 +21,7 @@ import java.lang.Math;
  * @param <AcFunc> Activation Function of each layer, note that AcFunc[0] is not used as Observation is given
  * @param <Observation> Input to the first layer (observation data)
  *                      Note: During Initialisation, Observation is used to stream W and VW for each layer
- * @param <BiasInitData> Initialisation Data for Bias
+ * @param <BiasStdInitData> Initialisation Data for Bias and Std
  * @param <beginInit> begin initialisation. Weight initialisation and bias initialisation happen concurrently.
  *
  */
@@ -30,14 +30,18 @@ import java.lang.Math;
 class Fwd extends KernelLib{
 
     private DFEVar EnObservationInput;
+    private DFEVar EnWeightInput;
     private DFEVar EnBiasStdInput;
     private DFEVector<DFEVar> Mean;
     private DFEVar MeanValid;
+    private DFEVector<DFEVar> Std;
     
     public DFEVar getEnObservationInput()  {return EnObservationInput;}
+    public DFEVar getEnWeightInput()       {return EnWeightInput;}
     public DFEVar getEnBiasStdInput()      {return EnBiasStdInput;}
     public DFEVector<DFEVar> getMean()     {return Mean;}
     public DFEVar isMeanValid()            {return MeanValid;}
+    public DFEVector<DFEVar> getStd()      {return Std;}
 
 
     Fwd(  KernelLib owner,
@@ -46,7 +50,8 @@ class Fwd extends KernelLib{
           int [] NumBlocks,
           char [] AcFunc,
           DFEVector<DFEVar> Observation,
-          DFEVar BiasInitData,
+          DFEVector<DFEVar> WeightInitData,
+          DFEVar BiasStdInitData,
           DFEVar beginInit,
           DFEVar beginFwdProp)
     {
@@ -130,14 +135,18 @@ class Fwd extends KernelLib{
                                         (WeightInitCount < FstLayerWeightInitCycles + SndLayerWeightInitCycles);
     DFEVar isTrdLayerWeightInitiating = isWeightInitiating & (WeightInitCount >= FstLayerWeightInitCycles + SndLayerWeightInitCycles);
 
+    // Input Control Signal for WeightInitData
+    EnWeightInput = isWeightInitiating;
 
-    /////////////////////// Control - Bias Initialisation ///////////////////////
+
+    /////////////////////// Control - Bias and Std Initialisation ///////////////////////
 
     // Parameters
     int FstLayerBiasInitCycles = LayerSize[1];
     int SndLayerBiasInitCycles = LayerSize[2];
     int TrdLayerBiasInitCycles = LayerSize[3];
-    int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles;
+    int          StdInitCycles = LayerSize[3];
+    int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles + StdInitCycles;
     
     // Bias Initialisation Counter
     DFEVar beginBiasStdInit = beginInit;
@@ -149,6 +158,15 @@ class Fwd extends KernelLib{
     DFEVar beginBiasInitFstLayer = isBiasStdInitiating & (BiasStdInitCount === 0);
     DFEVar beginBiasInitSndLayer = isBiasStdInitiating & (BiasStdInitCount === FstLayerBiasInitCycles);
     DFEVar beginBiasInitTrdLayer = isBiasStdInitiating & (BiasStdInitCount === FstLayerBiasInitCycles + SndLayerBiasInitCycles);
+    DFEVar beginStdInit = isBiasStdInitiating & (BiasStdInitCount === FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles);
+
+    // Std Initialisation Counter
+    AddrGenerator StdInitCounter = new AddrGenerator(this, 1, StdInitCycles, beginStdInit);
+    DFEVar    StdInitCount = StdInitCounter.getAddr();
+    DFEVar isStdInitiating = StdInitCounter.isValid();
+
+    // Input Control Signal for BiasStdInitData
+    EnBiasStdInput = isBiasStdInitiating;
 
 
     /////////////////////// Control - Forward Propagation ///////////////////////
@@ -187,11 +205,7 @@ class Fwd extends KernelLib{
    
     // Input Control Signal for Observation
     AddrGenerator NewSampleInputCounter = new AddrGenerator(this, 1, BlockDim[0], beginFwdProp);
-    DFEVar isStreamingNewSample = NewSampleInputCounter.isValid();    
-    EnObservationInput = isWeightInitiating | isStreamingNewSample;
-
-    // Input Control Signal for BiasInitData
-    EnBiasStdInput = isBiasStdInitiating;
+    EnObservationInput = NewSampleInputCounter.isValid();
 
 
     /////////////////////// Input Buffer /////////////////////// 
@@ -215,11 +229,11 @@ class Fwd extends KernelLib{
     DFEVar beginFwdPropFst = beginFwdProp;
     DFEVector<DFEVar> y_0_in = Y0_Type.newInstance(this);
     for (int i=0; i<NumBlocks[0]; ++i) {
-        y_0_in[i] <== isFstLayerWeightInitiating ? Observation[i] : y_0[i];
+        y_0_in[i] <== isFstLayerWeightInitiating ? WeightInitData[i] : y_0[i];
     }
 
     OddFwdLayer FstLayer = new OddFwdLayer(this, 0, AcFunc[1], BlockDim[0], NumBlocks[0], BlockDim[1], NumBlocks[1],
-                                     y_0_in, BiasInitData, beginWeightInitFstLayer, beginBiasInitFstLayer, beginFwdPropFst);
+                                     y_0_in, BiasStdInitData, beginWeightInitFstLayer, beginBiasInitFstLayer, beginFwdPropFst);
     
     // Outputs for Forward Propagation
     DFEVector<DFEVar>  y_1_toBuffer = FstLayer.getY();
@@ -248,11 +262,11 @@ class Fwd extends KernelLib{
     DFEVar beginFwdPropSnd = FstLayerFirstResultReady;
     DFEVector<DFEVar> y_1_in = Y1_Type.newInstance(this);
     for (int i=0; i<NumBlocks[1]; ++i) {
-        y_1_in[i] <== isSndLayerWeightInitiating ? Observation[i] : y_1[i];
+        y_1_in[i] <== isSndLayerWeightInitiating ? WeightInitData[i] : y_1[i];
     }
 
     EvenFwdLayer SndLayer = new EvenFwdLayer(this, 1, AcFunc[2], BlockDim[1], NumBlocks[1], BlockDim[2], NumBlocks[2], Fwd_Snd_CycleTime,
-                                           y_1_in, BiasInitData, beginWeightInitSndLayer, beginBiasInitSndLayer, beginFwdPropSnd);
+                                           y_1_in, BiasStdInitData, beginWeightInitSndLayer, beginBiasInitSndLayer, beginFwdPropSnd);
 
     // Outputs for Forward Propagation
     DFEVector<DFEVar>  y_2_toBuffer = SndLayer.getY();
@@ -280,11 +294,11 @@ class Fwd extends KernelLib{
     DFEVar beginFwdPropTrd = SndLayerFirstResultReady;
     DFEVector<DFEVar> y_2_in = Y2_Type.newInstance(this);
     for (int i=0; i<NumBlocks[2]; ++i) {
-        y_2_in[i] <== isTrdLayerWeightInitiating ? Observation[i] : y_2[i];
+        y_2_in[i] <== isTrdLayerWeightInitiating ? WeightInitData[i] : y_2[i];
     }
     
     OddFwdLayer TrdLayer = new OddFwdLayer(this, 2, AcFunc[3], BlockDim[2], NumBlocks[2], BlockDim[3], NumBlocks[3], 
-                                     y_2_in, BiasInitData, beginWeightInitTrdLayer, beginBiasInitTrdLayer, beginFwdPropTrd);
+                                     y_2_in, BiasStdInitData, beginWeightInitTrdLayer, beginBiasInitTrdLayer, beginFwdPropTrd);
 
     // Outputs for Forward Propagation
     DFEVector<DFEVar>  y_3_toBuffer = TrdLayer.getY();
@@ -293,8 +307,9 @@ class Fwd extends KernelLib{
     FwdBuf2FwdOffsetReadAddrCol <== TrdLayer.getFwdInputReadOffsetAddr();
 
 
-    /////////////////////// Buffering Mean ///////////////////////
+    /////////////////////// Mean ///////////////////////
     
+    // TODO Support Arbitrary Parallelism and ActionSpaceDim
     Mean = Mean_Type.newInstance(this);
     DFEVar Mean01EnWrite =  TrdLayerFirstResultReady & TrdLayerOutputValid;
     DFEVar Mean2EnWrite  = ~TrdLayerFirstResultReady & TrdLayerOutputValid;
@@ -303,6 +318,15 @@ class Fwd extends KernelLib{
     Mean[2] <== Reductions.streamHold(y_3_toBuffer[1], Mean01EnWrite);
 
     MeanValid = Mean2EnWrite;
+
+
+    /////////////////////// Std ///////////////////////
+
+    // Std Block
+    Std = Mean_Type.newInstance(this);
+    for (int i=0; i<Def.ActionSpaceDim; ++i) {
+        Std[i] <== Reductions.streamHold(BiasStdInitData, isStdInitiating & (StdInitCount === i));
+    }
 
 
     /////////////////////// Debug ///////////////////////

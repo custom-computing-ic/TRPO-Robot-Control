@@ -42,7 +42,7 @@ MAXELEROSDIR_SIM:=$(MAXCOMPILERDIR)/lib/maxeleros-sim
 
 # ---- Source files ----
 ENGINEFILES=$(wildcard ../src/*.maxj) $(wildcard ../src/*/*.maxj)
-CPUFILES:=../src/TRPO_Util.c ../src/lbfgs.c ../src/TRPO_Baseline.c ../src/TRPO_Lightweight.c  ../src/TRPOCpuCode.c ../src/TRPO_FVP.c ../src/TRPO_FVP_FPGA.c
+CPUFILES:=../src/TRPO_Util.c ../src/lbfgs.c ../src/TRPO_Baseline.c ../src/TRPO_Lightweight.c  ../src/TRPOCpuCode.c ../src/TRPO_FVP.c ../src/TRPO_FVP_FPGA.c ../src/TRPO_Lightweight_FPGA.c
 SIMOBJFILES:=$(patsubst %.c, %.o, $(CPUFILES))
 #DFEOBJFILES:=$(patsubst %.c, %.o, $(CPUFILES))
 
