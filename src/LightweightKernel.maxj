@@ -112,7 +112,7 @@ class LightweightKernel extends Kernel {
     EnBiasStdInput <== FwdCalc.getEnBiasStdInput();
     DFEVector<DFEVar> Mean = FwdCalc.getMean();
     DFEVector<DFEVar> Std  = FwdCalc.getStd();
-    DFEVar isMeanValid = FwdCalc.isMeanValid();
+    DFEVar isFwdValid      = FwdCalc.isValid();
 
 
     /////////////////////// Output ///////////////////////
@@ -120,9 +120,9 @@ class LightweightKernel extends Kernel {
     // TODO Calculate Reward
     // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
     DFEVar RewardData = Tick;
-    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isMeanValid);
+    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isFwdValid);
 
-    debug.simPrintf(isMeanValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
+    debug.simPrintf(isFwdValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
 
     }
 

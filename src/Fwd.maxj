@@ -33,15 +33,15 @@ class Fwd extends KernelLib{
     private DFEVar EnWeightInput;
     private DFEVar EnBiasStdInput;
     private DFEVector<DFEVar> Mean;
-    private DFEVar MeanValid;
     private DFEVector<DFEVar> Std;
+    private DFEVar OutputValid;
     
     public DFEVar getEnObservationInput()  {return EnObservationInput;}
     public DFEVar getEnWeightInput()       {return EnWeightInput;}
     public DFEVar getEnBiasStdInput()      {return EnBiasStdInput;}
     public DFEVector<DFEVar> getMean()     {return Mean;}
-    public DFEVar isMeanValid()            {return MeanValid;}
     public DFEVector<DFEVar> getStd()      {return Std;}
+    public DFEVar isValid()                {return OutputValid;}
 
 
     Fwd(  KernelLib owner,
@@ -97,17 +97,6 @@ class Fwd extends KernelLib{
 
     // Type of Mean Vector
     DFEVectorType<DFEVar> Mean_Type = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
-
-
-    /////////////////////// Total Counter ///////////////////////
-
-    // Total Counter
-    Count.Params TotalCounterParam = control.count.makeParams(32)
-                                                  .withInitValue(0)
-                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
-                                                  .withReset(beginInit);
-    Counter TotalCounter = control.count.makeCounter(TotalCounterParam);
-    DFEVar TotalCount = TotalCounter.getCount();
 
 
     /////////////////////// Control - Weight Initialisation ///////////////////////
@@ -180,16 +169,6 @@ class Fwd extends KernelLib{
                                                   .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
                                                   .withReset(beginFwdProp);
     Counter InnerLoopCounter = control.count.makeCounter(InnerLoopCounterParam);
-    DFEVar InnerLoopCount = InnerLoopCounter.getCount();
-
-    // Outer Loop - Counting the number of samples processed
-    Count.Params OuterLoopCounterParam = control.count.makeParams(32)
-                                                  .withInitValue(0)
-                                                  .withEnable(InnerLoopCounter.getWrap())
-                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
-                                                  .withReset(beginFwdProp);
-    Counter OuterLoopCounter = control.count.makeCounter(OuterLoopCounterParam);
-    DFEVar OuterLoopCount = OuterLoopCounter.getCount();
 
     // Buffer Read and Write Row Address - Swapping Row 0 and Row 1
     Count.Params FwdBufRowAddrCounterParam = control.count.makeParams(2)
@@ -307,40 +286,40 @@ class Fwd extends KernelLib{
     FwdBuf2FwdOffsetReadAddrCol <== TrdLayer.getFwdInputReadOffsetAddr();
 
 
-    /////////////////////// Mean ///////////////////////
-    
-    // TODO Support Arbitrary Parallelism and ActionSpaceDim
+    /////////////////////// Output ///////////////////////
+
+    // Total Cycles of Mean Output
+    AddrGenerator MeanOutputCounter = new AddrGenerator(this, 1, BlockDim[3], TrdLayerFirstResultReady, TrdLayerOutputValid);
+    DFEVar MeanOutputCount = MeanOutputCounter.getAddr();
+
+    // Mean
     Mean = Mean_Type.newInstance(this);
-    DFEVar Mean01EnWrite =  TrdLayerFirstResultReady & TrdLayerOutputValid;
-    DFEVar Mean2EnWrite  = ~TrdLayerFirstResultReady & TrdLayerOutputValid;
-    Mean[0] <== Reductions.streamHold(y_3_toBuffer[0], Mean01EnWrite);
-    Mean[1] <== Reductions.streamHold(y_3_toBuffer[0], Mean2EnWrite);
-    Mean[2] <== Reductions.streamHold(y_3_toBuffer[1], Mean01EnWrite);
+    for (int i=0; i<Def.ActionSpaceDim; ++i) {
+        int LineSelect = i / BlockDim[3];
+        int TimeSelect = i % BlockDim[3];
+        Mean[i] <== Reductions.streamHold(y_3_toBuffer[LineSelect], TrdLayerOutputValid & (MeanOutputCount === TimeSelect));
+    }
 
-    MeanValid = Mean2EnWrite;
-
-
-    /////////////////////// Std ///////////////////////
-
-    // Std Block
+    // Std
     Std = Mean_Type.newInstance(this);
     for (int i=0; i<Def.ActionSpaceDim; ++i) {
         Std[i] <== Reductions.streamHold(BiasStdInitData, isStdInitiating & (StdInitCount === i));
     }
 
+    // Is Output Valid
+    OutputValid = TrdLayerOutputValid & (MeanOutputCount === BlockDim[3]-1);
+
 
     /////////////////////// Debug ///////////////////////
 
-
+/*
     // Tick
     DFEVar Tick = control.count.simpleCounter(32);
-
     debug.simPrintf(beginInit,     "[%4d] Begin Initialisation...\n", Tick);
     debug.simPrintf(beginFwdProp,  "[%4d] ---- Begin Fwd Prop Sample [%d] ------------------------------------\n", Tick, OuterLoopCount);
     debug.simPrintf(TrdLayer.isFwdFirstItemReady(), "[%4d] First Third Layer Forward Propagation Output is ready.\n", Tick);
     debug.simPrintf(TrdLayer.isFwdValid(), "[%4d] y=(%f, %f) => Mean=(%f, %f, %f)\n", Tick, y_3_toBuffer[0], y_3_toBuffer[1], Mean[0], Mean[1], Mean[2]);
-
-
+*/
 
     }
 }
