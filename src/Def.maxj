@@ -68,6 +68,8 @@ class Def {
     public static final double PipelineFactorMult    = 1.0;
     public static final double PipelineFactorDefault = 1.0;
 
+    public static final int ForwardKinematicsCalcLatency = 300;
+
 
     ///////////////////////// Data Types /////////////////////////
 
@@ -96,6 +98,9 @@ class Def {
     // For tanh() Activation Function - current AcExpType supports inputs within [-9, 9]
     public static final DFEType AcInType  = KernelLib.dfeFix(6, FracBits, SignMode.TWOSCOMPLEMENT);
     public static final DFEType AcExpType = KernelLib.dfeFix(26, FracBits, SignMode.UNSIGNED);
+
+    // For Reward Calculation - need a few more fractional bits to avoid cancellation
+    public static final DFEType RewardType = KernelLib.dfeFix(5, FracBits, SignMode.TWOSCOMPLEMENT);
 
 
     ///////////////////////// Software Utility Functions /////////////////////////

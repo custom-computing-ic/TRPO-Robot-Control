@@ -535,14 +535,14 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                 ob[13] = Object_y;
                 ob[14] = Object_z;
 
-                // For debug
-                if (timeStep<4) {
-                    for (int i=0; i<ObservSpaceDim; ++i) ob[i] = 0.1 * (timeStep+1);
-                }
 
                 // Save Data to Observation Matrix
                 for (int i=0; i<ObservSpaceDim; ++i) Observ[RowAddr*ObservSpaceDim+i] = ob[i];
 
+                if (timeStep<4) {
+//                    for (int i=3; i<12; ++i) printf("%f ", ob[i]);
+                    printf("\n");
+                }
                 
                 ///////// Forward Propagation /////////
                 
@@ -586,7 +586,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
 
                 // For Debug
                 if (timeStep<4) {
-                    printf("CPU Mean = %f %f %f \n", Layer[NumLayers-1][0], Layer[NumLayers-1][1], Layer[NumLayers-1][2]);
+//                    printf("CPU Mean = %f %f %f \n", Layer[NumLayers-1][0], Layer[NumLayers-1][1], Layer[NumLayers-1][2]);
                 }
                 
                 // Save Data to Std Vector
@@ -604,10 +604,16 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                     ac[i] = z0 * Std[i] + Layer[NumLayers-1][i];
                 }
 
+                // For debug
+                if (timeStep==0) {ac[0] = -1.336706; ac[1] = -0.754209; ac[2] = -0.214136;}
+                if (timeStep==1) {ac[0] = 0.522698;  ac[1] = -0.091836; ac[2] = 0.090208;}
+                if (timeStep==2) {ac[0] = -1.307456; ac[1] = 0.268253;  ac[2] = -0.916509;}
+                if (timeStep==3) {ac[0] = -0.325344; ac[1] = 0.916386;  ac[2] = -0.371073;}
+
                 // Save Data to Action Matrix
                 for (int i=0; i<ActionSpaceDim; ++i) Action[RowAddr*ActionSpaceDim+i] = ac[i];
 
-                
+
                 ///////// Lightweight Simulator /////////
 
                 // Update Theta
@@ -649,6 +655,9 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                 double   gripPos[3] = {Grip_x, Grip_y, Grip_z};
                 double objectPos[3] = {Object_x, Object_y, Object_z};
 
+                // For debug
+                printf("Grip = (%f, %f, %f), Object = (%f, %f, %f)\n", Grip_x, Grip_y, Grip_z, Object_x, Object_y, Object_z);
+
 
                 ///////// Calculating Reward /////////
                 
@@ -656,11 +665,17 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                 double re = 0;
                 for (int i=0; i<3; ++i) {
                     re -= 100 * (objectPos[i] - gripPos[i]) * (objectPos[i] - gripPos[i]);
-                    re -= ac[i] * ac[i];
+//                    re -= ac[i] * ac[i];
                 }
+                double re_dist = re;
+                for (int i=0; i<3; ++i) re -= ac[i] * ac[i];
                 
                 // Save Reward to Reward Vector
-                Reward[RowAddr] = re;                            
+                Reward[RowAddr] = re;
+                
+                if (timeStep<4) {
+                    printf("Reward_Distance = %f, Reward_Action = %f, Reward = %f\n", re_dist, re - re_dist, re);
+                }
             
             } // End of Episode
         

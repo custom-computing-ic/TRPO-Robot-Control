@@ -119,9 +119,8 @@ public class TRPOManager extends CustomManager{
         ///////////////////////// Ticks /////////////////////////
 
         // Number of Ticks
-        // TODO How many additional cycles for Simulator? currently 10
         int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
-        int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3] + 10;
+        int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3] + Def.ForwardKinematicsCalcLatency;
         int FwdPropCycles = FwdPropCyclesPerSample * Def.NumSamples / Def.NumLightweightSimulators;
         int NumTicks = WeightInitVecLength + FwdPropCycles + 4;
         ei.setTicks(LightweightKernel_Name, NumTicks);

@@ -22,7 +22,6 @@ class LightweightKernel extends Kernel {
     int NumLayers     = Def.NumLayers;
     int  [] LayerSize = Def.LayerSize;
     int  [] NumBlocks = Def.NumBlocks;
-    char [] AcFunc    = Def.AcFunc;
 
     // Vector Types
     DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.InputType, NumBlocks[0]);
@@ -45,18 +44,17 @@ class LightweightKernel extends Kernel {
     int          StdInitCycles = LayerSize[3];
     int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles + StdInitCycles;
 
-    // Number of Cycles for Each Round of Simulation (Forward Propagation + 10)
-    // TODO 10 is also used in the Manager, must be consistent
+    // Number of Cycles for Each Round of Simulation (Forward Propagation + ForwardKinematicsCalcLatency)
     int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
     int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
-    int SimulationCyclesPerSample = FwdPropCyclesPerSample + 10;
+    int SimulationCyclesPerSample = FwdPropCyclesPerSample + Def.ForwardKinematicsCalcLatency;
 
     // Total Simulation Time
     int NumSimulationRounds = Def.NumSamples / Def.NumLightweightSimulators;
     int NumSimulationCycles = NumSimulationRounds * SimulationCyclesPerSample;
     
    
-    /////////////////////// Control ///////////////////////
+    /////////////////////// Control - Initialisation ///////////////////////
     
     // TODO Time-Multiplexing of Multiple Lightweight Simulators
     
@@ -76,6 +74,7 @@ class LightweightKernel extends Kernel {
     DFEVar isBiasStdInitiating = BiasStdInitCounter.isValid();
 
 
+    /////////////////////// Control - Simulation ///////////////////////
 
     // Lightweight Simulation Control
     AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, NumSimulationCycles, beginSimulation);
@@ -115,29 +114,24 @@ class LightweightKernel extends Kernel {
     DFEVar BiasStdInitData = InBiasStd.cast(Def.DataType);
 
 
-    /////////////////////// Forward Propagation ///////////////////////
+    /////////////////////// Lightweight Simulator ///////////////////////
 
-    // TODO Observation
-    DFEVector<DFEVar> Observation = ObVecType.newInstance(this);
-    for(int i=0; i<NumBlocks[0]; ++i) {
-        Observation[i] <== 0.1 * (OuterLoopCount+1).cast(Def.DataType);
-    }
-
-    // Forward Propagation
-    Fwd FwdCalc = new Fwd(this, 1, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
-    DFEVector<DFEVar> Mean = FwdCalc.getMean();
-    DFEVector<DFEVar> Std  = FwdCalc.getStd();
-    DFEVar isFwdValid      = FwdCalc.isValid();
+    LightweightSimulator LW1 = new LightweightSimulator(this, 0, WeightInitData, BiasStdInitData, beginInit, beginSimulation);
+    DFEVector<DFEVar> Mean   = LW1.getMean();
+    DFEVector<DFEVar> Std    = LW1.getStd();
+    DFEVector<DFEVar> Observ = LW1.getObserv();
+    DFEVector<DFEVar> Action = LW1.getAction();
+    DFEVar Reward = LW1.getReward();
+    DFEVar isLW1Valid = LW1.isValid();
 
 
     /////////////////////// Output ///////////////////////
-    
-    // TODO Calculate Reward
-    // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
-    DFEVar RewardData = Tick;
-    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isFwdValid);
 
-    debug.simPrintf(isFwdValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
+    // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
+    DFEVar RewardData = Reward;
+    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isLW1Valid);
+
+    //debug.simPrintf(isLW1Valid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
 
     }
 
