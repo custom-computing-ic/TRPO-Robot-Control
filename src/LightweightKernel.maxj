@@ -38,6 +38,13 @@ class LightweightKernel extends Kernel {
     int TrdLayerWeightInitCycles = BlockDim[2] * LayerSize[3];
     int WeightInitCycles = FstLayerWeightInitCycles + SndLayerWeightInitCycles + TrdLayerWeightInitCycles;    
 
+    // Number of Cycles for Bias & Std Initialisation
+    int FstLayerBiasInitCycles = LayerSize[1];
+    int SndLayerBiasInitCycles = LayerSize[2];
+    int TrdLayerBiasInitCycles = LayerSize[3];
+    int          StdInitCycles = LayerSize[3];
+    int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles + StdInitCycles;
+
     // Number of Cycles for Each Round of Simulation (Forward Propagation + 10)
     // TODO 10 is also used in the Manager, must be consistent
     int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
@@ -117,7 +124,7 @@ class LightweightKernel extends Kernel {
     }
 
     // Forward Propagation
-    Fwd FwdCalc = new Fwd(this, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
+    Fwd FwdCalc = new Fwd(this, 1, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
     DFEVector<DFEVar> Mean = FwdCalc.getMean();
     DFEVector<DFEVar> Std  = FwdCalc.getStd();
     DFEVar isFwdValid      = FwdCalc.isValid();

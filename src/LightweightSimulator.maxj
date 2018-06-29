@@ -1,30 +1,36 @@
 import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEFix.SignMode;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
-import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Control;
 import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.KernelMath;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Stream.OffsetExpr;
+import com.maxeler.maxcompiler.v2.utils.MathUtils;
 
 
 class LightweightSimulator extends KernelLib {
 
-    private DFEVar EnObservationInput;
     private DFEVector<DFEVar> Mean;
     private DFEVector<DFEVar> Std;
+    private DFEVector<DFEVar> Observ;
+    private DFEVector<DFEVar> Action;
+    private DFEVar Reward;
     private DFEVar OutputValid;
-    
-    public DFEVar getEnObservationInput()  {return EnObservationInput;}
-    public DFEVector<DFEVar> getMean()     {return Mean;}
-    public DFEVector<DFEVar> getStd()      {return Std;}
-    public DFEVar isValid()                {return OutputValid;}
+
+    public DFEVector<DFEVar> getMean()      {return Mean;}
+    public DFEVector<DFEVar> getStd()       {return Std;}
+    public DFEVector<DFEVar> getObserv()    {return Observ;}
+    public DFEVector<DFEVar> getAction()    {return Action;}
+    public DFEVar getReward()               {return Reward;}
+    public DFEVar isValid()                 {return OutputValid;}
 
 
     LightweightSimulator(   KernelLib owner,
                             int ID,
-                            DFEVector<DFEVar> Observation,
                             DFEVector<DFEVar> WeightInitData,
                             DFEVar BiasStdInitData,
                             DFEVar beginInit,
@@ -43,9 +49,9 @@ class LightweightSimulator extends KernelLib {
     char [] AcFunc    = Def.AcFunc;
 
     // Vector Types
-    DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.InputType, NumBlocks[0]);
     DFEVectorType<DFEVar> ObVecType = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[0]);
-    DFEVectorType<DFEVar> AcVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
+    DFEVectorType<DFEVar> ObservVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ObservSpaceDim);
+    DFEVectorType<DFEVar> ActionVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
 
     // Calculate BlockDim
     int [] BlockDim = new int[NumLayers];
@@ -107,25 +113,21 @@ class LightweightSimulator extends KernelLib {
 	DFEVar URand2 = Prefix0.cat(UniformRandomNumber128Bit.slice(80, 31)).cast(dfeFix(1, 31, SignMode.UNSIGNED));
 
     // Generating Random Object Positions
-    DFEVar Object_x_IN = URand0.cast(Def.DataType) * 0.076 + 0.084;
-    DFEVar Object_y_IN = URand1.cast(Def.DataType) * 0.100 - 0.050;
-    DFEVar Object_z_IN = URand2.cast(Def.DataType) * 0.100;
-
-
-
+    DFEVar Object_x = URand0.cast(Def.DataType) * 0.076 + 0.084;
+    DFEVar Object_y = URand1.cast(Def.DataType) * 0.100 - 0.050;
+    DFEVar Object_z = URand2.cast(Def.DataType) * 0.100;
 
 
     /////////////////////// Observation ///////////////////////
     
-    // TODO Control
-    DFEVar EnObservInit;
-    DFEVar EnObservUpdate;
+    // Control
+    DFEVar EnObservInit = beginSimulation;
+    DFEVar EnObservUpdate = dfeUInt(1).newInstance(this);
 
     // Internal State
-    DFEVar theta_1;
-    DFEVar theta_2;
-    DFEVar theta_3;
-
+    DFEVar theta_1_IN = Def.DataType.newInstance(this);
+    DFEVar theta_2_IN = Def.DataType.newInstance(this);
+    DFEVar theta_3_IN = Def.DataType.newInstance(this);
 
     // DOF1 - Always Fixed
 
@@ -146,28 +148,33 @@ class LightweightSimulator extends KernelLib {
 
     // Object - Fixed in Each Episode 
 
+    // theta
+    DFEVar theta_1 = Reductions.streamHold(theta_1_IN, EnObservInit | EnObservUpdate);
+    DFEVar theta_2 = Reductions.streamHold(theta_2_IN, EnObservInit | EnObservUpdate);
+    DFEVar theta_3 = Reductions.streamHold(theta_3_IN, EnObservInit | EnObservUpdate);
+
     // Observation[0]: DOF1_x, DOF1_y, DOF1_z, DOF2_x
     DFEVar Observ_00 = constant.var(Def.DataType, Def.DOF1_x);
     DFEVar Observ_01 = constant.var(Def.DataType, Def.DOF1_y);
     DFEVar Observ_02 = constant.var(Def.DataType, Def.DOF1_z);
-    DFEVar Observ_03 = Reductions.streamHold(DOF2_x_IN, EnObservUpdate);
+    DFEVar Observ_03 = Reductions.streamHold(DOF2_x_IN, EnObservInit | EnObservUpdate);
 
     // Observation[1]: DOF2_y, DOF2_z, Wrist_x, Wrist_y
-    DFEVar Observ_10 = Reductions.streamHold(DOF2_y_IN, EnObservUpdate);
-    DFEVar Observ_11 = Reductions.streamHold(DOF2_z_IN, EnObservUpdate);
-    DFEVar Observ_12 = Reductions.streamHold(Wrist_x_IN, EnObservUpdate);
-    DFEVar Observ_13 = Reductions.streamHold(Wrist_y_IN, EnObservUpdate);
+    DFEVar Observ_10 = Reductions.streamHold(DOF2_y_IN, EnObservInit | EnObservUpdate);
+    DFEVar Observ_11 = Reductions.streamHold(DOF2_z_IN, EnObservInit | EnObservUpdate);
+    DFEVar Observ_12 = Reductions.streamHold(Wrist_x_IN, EnObservInit | EnObservUpdate);
+    DFEVar Observ_13 = Reductions.streamHold(Wrist_y_IN, EnObservInit | EnObservUpdate);
     
     // Observation[2]: Wrist_z, Grip_x, Grip_y, Grip_z
-    DFEVar Observ_20 = Reductions.streamHold(Wrist_z_IN, EnObservUpdate);
-    DFEVar Observ_21 = Reductions.streamHold(Grip_x_IN, EnObservUpdate);    
-    DFEVar Observ_22 = Reductions.streamHold(Grip_y_IN, EnObservUpdate);
-    DFEVar Observ_23 = Reductions.streamHold(Grip_z_IN, EnObservUpdate);
+    DFEVar Observ_20 = Reductions.streamHold(Wrist_z_IN, EnObservInit | EnObservUpdate);
+    DFEVar Observ_21 = Reductions.streamHold(Grip_x_IN, EnObservInit | EnObservUpdate);    
+    DFEVar Observ_22 = Reductions.streamHold(Grip_y_IN, EnObservInit | EnObservUpdate);
+    DFEVar Observ_23 = Reductions.streamHold(Grip_z_IN, EnObservInit | EnObservUpdate);
 
     // Observation[3]: Object_x, Object_y, Object_z, Padding Zero
-    DFEVar Observ_30 = Reductions.streamHold(Object_x_IN, EnObservInit);
-    DFEVar Observ_31 = Reductions.streamHold(Object_y_IN, EnObservInit);
-    DFEVar Observ_32 = Reductions.streamHold(Object_z_IN, EnObservInit);
+    DFEVar Observ_30 = Reductions.streamHold(Object_x, EnObservInit);
+    DFEVar Observ_31 = Reductions.streamHold(Object_y, EnObservInit);
+    DFEVar Observ_32 = Reductions.streamHold(Object_z, EnObservInit);
     DFEVar Observ_33 = constant.var(Def.DataType, 0);
 
     // Observation MUX Control Signal
@@ -190,57 +197,122 @@ class LightweightSimulator extends KernelLib {
     /////////////////////// Forward Propagation ///////////////////////
     
     Fwd FwdCalc = new Fwd(this, ID, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
-    DFEVector<DFEVar> Mean = FwdCalc.getMean();
-    DFEVector<DFEVar> Std  = FwdCalc.getStd();
-    DFEVar isFwdValid      = FwdCalc.isValid();
+    Mean = FwdCalc.getMean();
+    Std  = FwdCalc.getStd();
+    DFEVar isFwdValid = FwdCalc.isValid();
 
 
     /////////////////////// Forward Kinematics ///////////////////////
 
-
-ac[i] = z0 * Std[i] + Layer[NumLayers-1][i];
-    // Get Action from Mean - Sample from the distribution
-    DFEVector<DFEVar> GRand = AcVecType.newInstance(this);
-    for (int i=0; i<ActionSpaceDim; ++i) {
-        GRand[i] = stream.offset(GaussianRandomNumber, i);
+    // Fetch Gaussian Random Numbers from the stream
+    DFEVector<DFEVar> GRand = ActionVecType.newInstance(this);
+    for (int i=0; i<Def.ActionSpaceDim; ++i) {
+        GRand[i] <== Reductions.streamHold(GaussianRandomNumber, isSimulating & (InnerLoopCount === 2*i+3));
     }
 
-    // Get Action from Reward
-DFEVector<DFEVar> GRand = AcVecType.newInstance(this);
-    
+    // Calculate Action
+    Action = ActionVecType.newInstance(this);
+    for (int i=0; i<Def.ActionSpaceDim; ++i) {
+        Action[i] <== Reductions.streamHold(GRand[i] * Std[i] + Mean[i], isFwdValid);
+    }
+
+    // Update theta
+    DFEVar theta_1_new = theta_1 + Action[0] * Def.TimeStepLen;
+    DFEVar theta_2_new = theta_2 + Action[1] * Def.TimeStepLen;
+    DFEVar theta_3_new = theta_3 + Action[2] * Def.TimeStepLen;
+
+    // Internal Trigonometric Calculation
+    DFEVar s1 = KernelMath.sin(theta_1_new);
+    DFEVar c1 = KernelMath.cos(theta_1_new);
+    DFEVar s2 = KernelMath.sin(theta_2_new);
+    DFEVar c2 = KernelMath.cos(theta_2_new);
+    DFEVar s3 = KernelMath.sin(theta_3_new);
+    DFEVar c3 = KernelMath.cos(theta_3_new);
+    DFEVar c2c3 = c2 * c3;
+    DFEVar s2s3 = s2 * s3;
+    DFEVar c2s3 = c2 * s3;
+    DFEVar s2c3 = s2 * c3;
+
+    // Update Body Positions (DOF1 and Object positions are fixed)
+
+    // DOF2
+    DFEVar DOF2_x_new = 0.0575 * c1 * c2;
+    DFEVar DOF2_y_new = 0.0575 * s1 * c2;
+    DFEVar DOF2_z_new = 0.01768 - 0.0575 * s2;
+
+    // Wrist
+    DFEVar Wrist_x_new = DOF2_x_new + 0.07375 * c1 * (c2c3 - s2s3);
+    DFEVar Wrist_y_new = DOF2_y_new + 0.07375 * s1 * (c2c3 - s2s3);
+    DFEVar Wrist_z_new = DOF2_z_new - 0.07375 * (c2s3 + s2c3);
+
+    // Grip
+    DFEVar Grip_x_new = DOF2_x_new + 0.11315 * c1 * (c2c3 - s2s3) - 0.0125 * c1 * (c2s3 + s2c3);
+    DFEVar Grip_y_new = DOF2_y_new + 0.11315 * s1 * (c2c3 - s2s3) - 0.0125 * s1 * (c2s3 + s2c3);
+    DFEVar Grip_z_new = DOF2_z_new - 0.11315 * (c2s3 + s2c3) + 0.0125 * (s2s3 - c2c3);
 
 
-                for (int i=0; i<ActionSpaceDim; ++i) {
-                    // Box-Muller
-                    double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
-                    double u2 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
-                    double z0 = sqrt(-2.0 * log(u1)) * cos(2*pi*u2);
-                    //double z1 = sqrt(-2.0 * log(u1)) * sin(2*pi*u2);
-                    
-                    // N(mu, sigma^2) = N(0,1) * sigma + mu
-                    
-                } 
+    /////////////////////// Connecting Back ///////////////////////
 
+    OffsetExpr ForwardKinematicsOffset = stream.makeOffsetAutoLoop("Simulator"+ID+"Forward Kinematics Offset");
 
+    // theta
+    theta_1_IN <== EnObservInit ? Def.theta_1 : stream.offset(theta_1_new, -ForwardKinematicsOffset);
+    theta_2_IN <== EnObservInit ? Def.theta_2 : stream.offset(theta_2_new, -ForwardKinematicsOffset);
+    theta_3_IN <== EnObservInit ? Def.theta_3 : stream.offset(theta_3_new, -ForwardKinematicsOffset);
 
+    // DOF2
+    DOF2_x_IN <== EnObservInit ? Def.DOF2_x : stream.offset(DOF2_x_new, -ForwardKinematicsOffset);
+    DOF2_y_IN <== EnObservInit ? Def.DOF2_y : stream.offset(DOF2_y_new, -ForwardKinematicsOffset);
+    DOF2_z_IN <== EnObservInit ? Def.DOF2_z : stream.offset(DOF2_z_new, -ForwardKinematicsOffset);
 
+    // Wrist
+    Wrist_x_IN <== EnObservInit ? Def.Wrist_x : stream.offset(Wrist_x_new, -ForwardKinematicsOffset);
+    Wrist_y_IN <== EnObservInit ? Def.Wrist_y : stream.offset(Wrist_y_new, -ForwardKinematicsOffset);
+    Wrist_z_IN <== EnObservInit ? Def.Wrist_z : stream.offset(Wrist_z_new, -ForwardKinematicsOffset);
 
+    // Grip
+    Grip_x_IN <== EnObservInit ? Def.Grip_x : stream.offset(Grip_x_new, -ForwardKinematicsOffset);
+    Grip_y_IN <== EnObservInit ? Def.Grip_y : stream.offset(Grip_y_new, -ForwardKinematicsOffset);
+    Grip_z_IN <== EnObservInit ? Def.Grip_z : stream.offset(Grip_z_new, -ForwardKinematicsOffset);
 
-
-
-
-
-
-
+    // EnUpdate
+    EnObservUpdate <== stream.offset(isFwdValid, -ForwardKinematicsOffset);
 
 
     /////////////////////// Output ///////////////////////
-    
-    // TODO Calculate Reward
-    // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
-    DFEVar RewardData = Tick;
-    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isFwdValid);
 
+    // Observ - Flattened Observation
+    Observ = ObservVecType.newInstance(this);
+    Observ[0] <== Observ_00;
+    Observ[1] <== Observ_01;
+    Observ[2] <== Observ_02;
+    Observ[3] <== Observ_03;
+    Observ[4] <== Observ_10;
+    Observ[5] <== Observ_11;
+    Observ[6] <== Observ_12;
+    Observ[7] <== Observ_13;
+    Observ[8] <== Observ_20;
+    Observ[9] <== Observ_21;
+    Observ[10] <== Observ_22;
+    Observ[11] <== Observ_23;
+    Observ[12] <== Observ_30;
+    Observ[13] <== Observ_31;
+    Observ[14] <== Observ_32;
+    Observ[15] <== Observ_33;
+    
+    // Calculating Reward
+    DFEVar Reward_1 = (Grip_x_new - Object_x) * (Grip_x_new - Object_x);
+    DFEVar Reward_2 = (Grip_y_new - Object_y) * (Grip_y_new - Object_y);
+    DFEVar Reward_3 = (Grip_z_new - Object_z) * (Grip_z_new - Object_z);
+    DFEVar Reward_4 = Action[0] * Action[0] + Action[1] * Action[1] + Action[2] * Action[2];
+    Reward = -100 * (Reward_1 + Reward_2 + Reward_3) - Reward_4;
+
+    // Is Output Valid
+    OutputValid = isFwdValid;
+
+
+    // Debug
+    DFEVar Tick = control.count.simpleCounter(32);
     debug.simPrintf(isFwdValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
 
     }

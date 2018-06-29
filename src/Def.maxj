@@ -19,6 +19,7 @@ class Def {
     public static final char [] AcFunc     = {'l', 't', 't', 'l'};
     public static final int  [] LayerSize  = { 16, 16, 16, 4};
     public static final int  [] NumBlocks  = {  4,  4,  4, 2};
+    public static final int ObservSpaceDim = 15;
     public static final int ActionSpaceDim = 3;
 
     // Lightweight Simulator
@@ -26,6 +27,7 @@ class Def {
     public static final int EpisodeLen  = 4;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
     public static final int NumLightweightSimulators = 1;
+    public static final double TimeStepLen = 0.02;
 
     // pi - for Gaussian Random Number generation
     public static final double pi = 3.1415926535897931;

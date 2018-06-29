@@ -509,6 +509,8 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             double Object_z = ((double)rand()/(double)RAND_MAX) * 0.100;
 
 
+            printf("Object_x = %f, Object_y = %f, Object_z = %f\n", Object_x, Object_y, Object_z);
+
             ///////// Rollout Several Time Steps in Each Episode /////////
             
             for(int timeStep=0; timeStep<EpLen; ++timeStep) {
