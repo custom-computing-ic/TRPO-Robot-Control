@@ -1,0 +1,66 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.utils.Bits;
+
+class Rand128 extends KernelLib {
+
+	private DFEVar Rand;
+	
+	public DFEVar getRand() {return Rand;}
+	
+ 	// 30 seeds 
+	private String [] seed = {"b80addff3bfb362f1b0b5126ebb0c7d5",
+						  "522a7fdcbe86e325306c8d8afe2e452a",
+						  "5e11d81f8d135fe258dad2c891a3c7f9",
+						  "20c2027fd1fb1b423aac0f0844d2f1e9",
+						  "63aefa995b2292e81c7cdde2d6313eda",
+						  "bae044c585b9eee96b1a066f3024f0ff",
+						  "0b2b653ffbb07acd896c9274c5d54f33",
+						  "b688697843e7610203d96929f7e4dccb",
+						  "f33e96637c036e689013900d2390cbd1",
+						  "e65087d879e73f9e67868fe9cdb094ae",
+						  "4e80e423f67c58669f92cb4f91485977",
+						  "e3fb7c9d230c3d224fb67ea1e4890e7a",
+						  "4b31bcb5931550246931d18e1c506cde",
+						  "84a2eec46d75737691061bd02918d55b",
+						  "06ff4e779afb0b1f72870d4b650ea5a0",
+						  "2b5148fc949111b45fd64dfd96cbaaba",
+						  "24ba5fa50f4758613d352792fb6058af",
+						  "9048e2fcd90df2614fe61a11b3af3cb2",
+						  "a14d80b2d6449624ab24fc04deb50502",
+						  "0ddad641770ce242100a5282f26c527c",
+						  "78b3526cc26aadc6537c1056990f2266",
+						  "886ba8108906e7351bfb78a8cd2cb9aa",
+						  "a865f91e075951af52ae46b4ee356975",
+						  "45455dcd3ba6b7495691db7c75dbb93d",
+						  "f068c427529748de4ac8ec5e14f29d39",
+						  "aed915fe8f157229f597029adfa5ded3",
+						  "07e8930fe919a65fdd1babd2717acad6",
+						  "a8493dd2a745b7d77963992dacdba459",
+						  "2aa8116b94c526cc6703f2856658ae5a",
+						  "e8bcd945e878f9877155636a2e5267e5"};
+
+	// ID is used to select seeds, ID must be an integer within [0, 9]
+	Rand128(int ID, KernelLib owner) {
+	
+		super(owner);
+		
+		DFEVar Tick = control.count.simpleCounter(2, 3);
+		
+		DFEVar Seed1 = constant.var(dfeRawBits(128), new Bits(128, seed[ID*3+0]));
+		DFEVar Seed2 = constant.var(dfeRawBits(128), new Bits(128, seed[ID*3+1]));
+		DFEVar Seed3 = constant.var(dfeRawBits(128), new Bits(128, seed[ID*3+2]));
+		
+		UrandomCore URand1 = new UrandomCore(this, Seed1);
+		UrandomCore URand2 = new UrandomCore(this, Seed2);
+		UrandomCore URand3 = new UrandomCore(this, Seed3);
+		
+		DFEVar Rand1 = URand1.getRandOut();
+		DFEVar Rand2 = URand2.getRandOut();
+		DFEVar Rand3 = URand3.getRandOut();
+		
+		Rand = (Tick===0) ? Rand1 : ((Tick===1) ? Rand2 : Rand3);
+		
+	}
+
+}

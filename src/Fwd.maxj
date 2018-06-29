@@ -30,21 +30,18 @@ import java.lang.Math;
 class Fwd extends KernelLib{
 
     private DFEVar EnObservationInput;
-    private DFEVar EnWeightInput;
-    private DFEVar EnBiasStdInput;
     private DFEVector<DFEVar> Mean;
     private DFEVector<DFEVar> Std;
     private DFEVar OutputValid;
     
     public DFEVar getEnObservationInput()  {return EnObservationInput;}
-    public DFEVar getEnWeightInput()       {return EnWeightInput;}
-    public DFEVar getEnBiasStdInput()      {return EnBiasStdInput;}
     public DFEVector<DFEVar> getMean()     {return Mean;}
     public DFEVector<DFEVar> getStd()      {return Std;}
     public DFEVar isValid()                {return OutputValid;}
 
 
     Fwd(  KernelLib owner,
+          int ID,
           int NumLayers,
           int [] LayerSize,
           int [] NumBlocks,
@@ -124,9 +121,6 @@ class Fwd extends KernelLib{
                                         (WeightInitCount < FstLayerWeightInitCycles + SndLayerWeightInitCycles);
     DFEVar isTrdLayerWeightInitiating = isWeightInitiating & (WeightInitCount >= FstLayerWeightInitCycles + SndLayerWeightInitCycles);
 
-    // Input Control Signal for WeightInitData
-    EnWeightInput = isWeightInitiating;
-
 
     /////////////////////// Control - Bias and Std Initialisation ///////////////////////
 
@@ -153,9 +147,6 @@ class Fwd extends KernelLib{
     AddrGenerator StdInitCounter = new AddrGenerator(this, 1, StdInitCycles, beginStdInit);
     DFEVar    StdInitCount = StdInitCounter.getAddr();
     DFEVar isStdInitiating = StdInitCounter.isValid();
-
-    // Input Control Signal for BiasStdInitData
-    EnBiasStdInput = isBiasStdInitiating;
 
 
     /////////////////////// Control - Forward Propagation ///////////////////////
@@ -211,7 +202,7 @@ class Fwd extends KernelLib{
         y_0_in[i] <== isFstLayerWeightInitiating ? WeightInitData[i] : y_0[i];
     }
 
-    OddFwdLayer FstLayer = new OddFwdLayer(this, 0, AcFunc[1], BlockDim[0], NumBlocks[0], BlockDim[1], NumBlocks[1],
+    OddFwdLayer FstLayer = new OddFwdLayer(this, ID*10+1, AcFunc[1], BlockDim[0], NumBlocks[0], BlockDim[1], NumBlocks[1],
                                      y_0_in, BiasStdInitData, beginWeightInitFstLayer, beginBiasInitFstLayer, beginFwdPropFst);
     
     // Outputs for Forward Propagation
@@ -227,7 +218,7 @@ class Fwd extends KernelLib{
     DFEVar FwdBuf1FwdReadAddrRow       = FwdBufRowAddr;
     DFEVar FwdBuf1FwdOffsetReadAddrCol = dfeUInt(Math.max(MathUtils.bitsToAddress(BlockDim[1]),1)).newInstance(this);
     
-    FwdLayerBuffer FwdBuf1 = new FwdLayerBuffer(this, 1, BlockDim[1], NumBlocks[1], BlockDim[1], NumBlocks[1], BufferDepth, 
+    FwdLayerBuffer FwdBuf1 = new FwdLayerBuffer(this, ID*10+1, BlockDim[1], NumBlocks[1], BlockDim[1], NumBlocks[1], BufferDepth, 
                                           y_1_toBuffer, FwdBuf1WriteAddrRow, FwdBuf1beginWrFwdData, 
                                           FwdBuf1isFwdDataInValid, FwdBuf1FwdReadAddrRow, FwdBuf1FwdOffsetReadAddrCol);
     DFEVector<DFEVar> y_1 = FwdBuf1.getFwdY();
@@ -244,7 +235,7 @@ class Fwd extends KernelLib{
         y_1_in[i] <== isSndLayerWeightInitiating ? WeightInitData[i] : y_1[i];
     }
 
-    EvenFwdLayer SndLayer = new EvenFwdLayer(this, 1, AcFunc[2], BlockDim[1], NumBlocks[1], BlockDim[2], NumBlocks[2], Fwd_Snd_CycleTime,
+    EvenFwdLayer SndLayer = new EvenFwdLayer(this, ID*10+2, AcFunc[2], BlockDim[1], NumBlocks[1], BlockDim[2], NumBlocks[2], Fwd_Snd_CycleTime,
                                            y_1_in, BiasStdInitData, beginWeightInitSndLayer, beginBiasInitSndLayer, beginFwdPropSnd);
 
     // Outputs for Forward Propagation
@@ -261,7 +252,7 @@ class Fwd extends KernelLib{
     DFEVar FwdBuf2FwdReadAddrRow       = FwdBufRowAddr;
     DFEVar FwdBuf2FwdOffsetReadAddrCol = dfeUInt(Math.max(MathUtils.bitsToAddress(BlockDim[2]),1)).newInstance(this);
     
-    FwdLayerBuffer FwdBuf2 = new FwdLayerBuffer(this, 2, BlockDim[2], NumBlocks[2], BlockDim[2], NumBlocks[2], BufferDepth, 
+    FwdLayerBuffer FwdBuf2 = new FwdLayerBuffer(this, ID*10+2, BlockDim[2], NumBlocks[2], BlockDim[2], NumBlocks[2], BufferDepth, 
                                           y_2_toBuffer, FwdBuf2WriteAddrRow, FwdBuf2beginWrFwdData, 
                                           FwdBuf2isFwdDataInValid, FwdBuf2FwdReadAddrRow, FwdBuf2FwdOffsetReadAddrCol);
     DFEVector<DFEVar> y_2 = FwdBuf2.getFwdY();
@@ -276,7 +267,7 @@ class Fwd extends KernelLib{
         y_2_in[i] <== isTrdLayerWeightInitiating ? WeightInitData[i] : y_2[i];
     }
     
-    OddFwdLayer TrdLayer = new OddFwdLayer(this, 2, AcFunc[3], BlockDim[2], NumBlocks[2], BlockDim[3], NumBlocks[3], 
+    OddFwdLayer TrdLayer = new OddFwdLayer(this, ID*10+3, AcFunc[3], BlockDim[2], NumBlocks[2], BlockDim[3], NumBlocks[3], 
                                      y_2_in, BiasStdInitData, beginWeightInitTrdLayer, beginBiasInitTrdLayer, beginFwdPropTrd);
 
     // Outputs for Forward Propagation

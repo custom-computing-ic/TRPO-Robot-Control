@@ -1,0 +1,248 @@
+import com.maxeler.maxcompiler.v2.kernelcompiler.KernelLib;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
+import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Control;
+import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.Reductions;
+
+
+class LightweightSimulator extends KernelLib {
+
+    private DFEVar EnObservationInput;
+    private DFEVector<DFEVar> Mean;
+    private DFEVector<DFEVar> Std;
+    private DFEVar OutputValid;
+    
+    public DFEVar getEnObservationInput()  {return EnObservationInput;}
+    public DFEVector<DFEVar> getMean()     {return Mean;}
+    public DFEVector<DFEVar> getStd()      {return Std;}
+    public DFEVar isValid()                {return OutputValid;}
+
+
+    LightweightSimulator(   KernelLib owner,
+                            int ID,
+                            DFEVector<DFEVar> Observation,
+                            DFEVector<DFEVar> WeightInitData,
+                            DFEVar BiasStdInitData,
+                            DFEVar beginInit,
+                            DFEVar beginSimulation)              // beginSimulation => Simulate one episode
+    
+    {
+    
+    super(owner);
+
+    /////////////////////// Parameters ///////////////////////
+    
+    // Note: LayerSize here should be padded number
+    int NumLayers     = Def.NumLayers;
+    int  [] LayerSize = Def.LayerSize;
+    int  [] NumBlocks = Def.NumBlocks;
+    char [] AcFunc    = Def.AcFunc;
+
+    // Vector Types
+    DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.InputType, NumBlocks[0]);
+    DFEVectorType<DFEVar> ObVecType = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[0]);
+    DFEVectorType<DFEVar> AcVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
+
+    // Calculate BlockDim
+    int [] BlockDim = new int[NumLayers];
+    for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
+
+    // Number of Cycles for Each Round of Simulation (Forward Propagation + 10)
+    // TODO 10 is also used in the Manager, must be consistent
+    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+    int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    int SimulationCyclesPerSample = FwdPropCyclesPerSample + 10;
+
+    // Total FPGA Cycles for simulating one episode
+    int NumSimulationCycles = Def.EpisodeLen * SimulationCyclesPerSample;
+
+
+    /////////////////////// Control - Overall Progress ///////////////////////
+
+    // Total Cycles of Lightweight Simulation
+    AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, NumSimulationCycles, beginSimulation);
+    DFEVar isSimulating = LightweightSimulationCounter.isValid();
+
+    // Inner Loop - Counting the Simulation of a sample
+    // Note: When this counter wraps, it means the system is ready to simulate another sample
+    Count.Params InnerLoopCounterParam = control.count.makeParams(16)
+                                                  .withInitValue(0)
+                                                  .withMax(SimulationCyclesPerSample)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginSimulation);
+    Counter InnerLoopCounter = control.count.makeCounter(InnerLoopCounterParam);
+    DFEVar InnerLoopCount = InnerLoopCounter.getCount();
+
+    // Outer Loop - Counting the number of Simulation Rounds
+    Count.Params OuterLoopCounterParam = control.count.makeParams(16)
+                                                  .withInitValue(0)
+                                                  .withEnable(InnerLoopCounter.getWrap())
+                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
+                                                  .withReset(beginSimulation);
+    Counter OuterLoopCounter = control.count.makeCounter(OuterLoopCounterParam);
+    DFEVar OuterLoopCount = OuterLoopCounter.getCount();
+
+    // Forward Propagation Control
+    DFEVar beginFwdProp = isSimulating & (InnerLoopCount === 0);
+
+
+    /////////////////////// Random Number Generation ///////////////////////
+    
+    Rand128 Rand128RNG = new Rand128(ID%10, this);
+    DFEVar UniformRandomNumber128Bit = Rand128RNG.getRand();
+    NrandomCore GaussianRNG = new NrandomCore(this, UniformRandomNumber128Bit, Def.DataType);
+    DFEVar GaussianRandomNumber = GaussianRNG.getOutput();
+
+
+    /////////////////////// Initialisation ///////////////////////
+
+    // Generating Uniform Numbers within [0,1)    
+    DFEVar Prefix0 = constant.var(dfeUInt(1), 0);
+    DFEVar URand0 = Prefix0.cat(UniformRandomNumber128Bit.slice(0, 31)).cast(dfeFix(1, 31, SignMode.UNSIGNED));
+	DFEVar URand1 = Prefix0.cat(UniformRandomNumber128Bit.slice(40, 31)).cast(dfeFix(1, 31, SignMode.UNSIGNED));
+	DFEVar URand2 = Prefix0.cat(UniformRandomNumber128Bit.slice(80, 31)).cast(dfeFix(1, 31, SignMode.UNSIGNED));
+
+    // Generating Random Object Positions
+    DFEVar Object_x_IN = URand0.cast(Def.DataType) * 0.076 + 0.084;
+    DFEVar Object_y_IN = URand1.cast(Def.DataType) * 0.100 - 0.050;
+    DFEVar Object_z_IN = URand2.cast(Def.DataType) * 0.100;
+
+
+
+
+
+    /////////////////////// Observation ///////////////////////
+    
+    // TODO Control
+    DFEVar EnObservInit;
+    DFEVar EnObservUpdate;
+
+    // Internal State
+    DFEVar theta_1;
+    DFEVar theta_2;
+    DFEVar theta_3;
+
+
+    // DOF1 - Always Fixed
+
+    // DOF2
+    DFEVar DOF2_x_IN = Def.DataType.newInstance(this);
+    DFEVar DOF2_y_IN = Def.DataType.newInstance(this);
+    DFEVar DOF2_z_IN = Def.DataType.newInstance(this);
+
+    // Wrist
+    DFEVar Wrist_x_IN = Def.DataType.newInstance(this);
+    DFEVar Wrist_y_IN = Def.DataType.newInstance(this);
+    DFEVar Wrist_z_IN = Def.DataType.newInstance(this);
+
+    // Grip
+    DFEVar Grip_x_IN = Def.DataType.newInstance(this);
+    DFEVar Grip_y_IN = Def.DataType.newInstance(this);
+    DFEVar Grip_z_IN = Def.DataType.newInstance(this);
+
+    // Object - Fixed in Each Episode 
+
+    // Observation[0]: DOF1_x, DOF1_y, DOF1_z, DOF2_x
+    DFEVar Observ_00 = constant.var(Def.DataType, Def.DOF1_x);
+    DFEVar Observ_01 = constant.var(Def.DataType, Def.DOF1_y);
+    DFEVar Observ_02 = constant.var(Def.DataType, Def.DOF1_z);
+    DFEVar Observ_03 = Reductions.streamHold(DOF2_x_IN, EnObservUpdate);
+
+    // Observation[1]: DOF2_y, DOF2_z, Wrist_x, Wrist_y
+    DFEVar Observ_10 = Reductions.streamHold(DOF2_y_IN, EnObservUpdate);
+    DFEVar Observ_11 = Reductions.streamHold(DOF2_z_IN, EnObservUpdate);
+    DFEVar Observ_12 = Reductions.streamHold(Wrist_x_IN, EnObservUpdate);
+    DFEVar Observ_13 = Reductions.streamHold(Wrist_y_IN, EnObservUpdate);
+    
+    // Observation[2]: Wrist_z, Grip_x, Grip_y, Grip_z
+    DFEVar Observ_20 = Reductions.streamHold(Wrist_z_IN, EnObservUpdate);
+    DFEVar Observ_21 = Reductions.streamHold(Grip_x_IN, EnObservUpdate);    
+    DFEVar Observ_22 = Reductions.streamHold(Grip_y_IN, EnObservUpdate);
+    DFEVar Observ_23 = Reductions.streamHold(Grip_z_IN, EnObservUpdate);
+
+    // Observation[3]: Object_x, Object_y, Object_z, Padding Zero
+    DFEVar Observ_30 = Reductions.streamHold(Object_x_IN, EnObservInit);
+    DFEVar Observ_31 = Reductions.streamHold(Object_y_IN, EnObservInit);
+    DFEVar Observ_32 = Reductions.streamHold(Object_z_IN, EnObservInit);
+    DFEVar Observ_33 = constant.var(Def.DataType, 0);
+
+    // Observation MUX Control Signal
+    Count.Params ObservSelectCounterParam = control.count.makeParams(MathUtils.bitsToAddress(BlockDim[0]))
+                                                  .withInitValue(0)
+                                                  .withMax(BlockDim[0])
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
+                                                  .withReset(beginFwdProp);
+    Counter ObservSelectCounter = control.count.makeCounter(ObservSelectCounterParam);
+    DFEVar ObservSelect = ObservSelectCounter.getCount();
+
+    // Observation MUX
+    DFEVector<DFEVar> Observation = ObVecType.newInstance(this);
+    Observation[0] <== control.mux(ObservSelect, Observ_00, Observ_01, Observ_02, Observ_03);
+    Observation[1] <== control.mux(ObservSelect, Observ_10, Observ_11, Observ_12, Observ_13);
+    Observation[2] <== control.mux(ObservSelect, Observ_20, Observ_21, Observ_22, Observ_23);
+    Observation[3] <== control.mux(ObservSelect, Observ_30, Observ_31, Observ_32, Observ_33);
+
+
+    /////////////////////// Forward Propagation ///////////////////////
+    
+    Fwd FwdCalc = new Fwd(this, ID, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
+    DFEVector<DFEVar> Mean = FwdCalc.getMean();
+    DFEVector<DFEVar> Std  = FwdCalc.getStd();
+    DFEVar isFwdValid      = FwdCalc.isValid();
+
+
+    /////////////////////// Forward Kinematics ///////////////////////
+
+
+ac[i] = z0 * Std[i] + Layer[NumLayers-1][i];
+    // Get Action from Mean - Sample from the distribution
+    DFEVector<DFEVar> GRand = AcVecType.newInstance(this);
+    for (int i=0; i<ActionSpaceDim; ++i) {
+        GRand[i] = stream.offset(GaussianRandomNumber, i);
+    }
+
+    // Get Action from Reward
+DFEVector<DFEVar> GRand = AcVecType.newInstance(this);
+    
+
+
+                for (int i=0; i<ActionSpaceDim; ++i) {
+                    // Box-Muller
+                    double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
+                    double u2 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
+                    double z0 = sqrt(-2.0 * log(u1)) * cos(2*pi*u2);
+                    //double z1 = sqrt(-2.0 * log(u1)) * sin(2*pi*u2);
+                    
+                    // N(mu, sigma^2) = N(0,1) * sigma + mu
+                    
+                } 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    /////////////////////// Output ///////////////////////
+    
+    // TODO Calculate Reward
+    // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
+    DFEVar RewardData = Tick;
+    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isFwdValid);
+
+    debug.simPrintf(isFwdValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
+
+    }
+
+}

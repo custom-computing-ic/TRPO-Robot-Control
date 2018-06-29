@@ -58,7 +58,19 @@ class LightweightKernel extends Kernel {
     DFEVar beginInit       = (Tick === 1);
     DFEVar beginSimulation = (Tick === WeightInitCycles);
 
-    // Total Cycles of Lightweight Simulation
+    // Weight Initialisation Control
+    DFEVar beginWeightInit = beginInit;
+    AddrGenerator WeightInitCounter = new AddrGenerator(this, 1, WeightInitCycles, beginWeightInit);
+    DFEVar isWeightInitiating = WeightInitCounter.isValid();
+
+    // Bias Initialisation Control
+    DFEVar beginBiasStdInit = beginInit;
+    AddrGenerator BiasStdInitCounter = new AddrGenerator(this, 1, BiasStdInitCycles, beginBiasStdInit);
+    DFEVar isBiasStdInitiating = BiasStdInitCounter.isValid();
+
+
+
+    // Lightweight Simulation Control
     AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, NumSimulationCycles, beginSimulation);
     DFEVar isSimulating = LightweightSimulationCounter.isValid();
 
@@ -88,13 +100,11 @@ class LightweightKernel extends Kernel {
     /////////////////////// Input ///////////////////////
     
     // Weight Input to Kernel - cast to fix point
-    DFEVar EnWeightInput = dfeUInt(1).newInstance(this);
-    DFEVector<DFEVar> InVec = io.input("WeightInit", InVecType, EnWeightInput);
+    DFEVector<DFEVar> InVec = io.input("WeightInit", InVecType, isWeightInitiating);
     DFEVector<DFEVar> WeightInitData = InVec.cast(ObVecType);
 
     // Bias and Std Input to Kernel - cast to fix point
-    DFEVar EnBiasStdInput  = dfeUInt(1).newInstance(this);
-    DFEVar InBiasStd       = io.input("BiasStdInit", Def.InputType, EnBiasStdInput);
+    DFEVar InBiasStd       = io.input("BiasStdInit", Def.InputType, isBiasStdInitiating);
     DFEVar BiasStdInitData = InBiasStd.cast(Def.DataType);
 
 
@@ -108,8 +118,6 @@ class LightweightKernel extends Kernel {
 
     // Forward Propagation
     Fwd FwdCalc = new Fwd(this, NumLayers, LayerSize, NumBlocks, AcFunc, Observation, WeightInitData, BiasStdInitData, beginInit, beginFwdProp);
-    EnWeightInput  <== FwdCalc.getEnWeightInput();
-    EnBiasStdInput <== FwdCalc.getEnBiasStdInput();
     DFEVector<DFEVar> Mean = FwdCalc.getMean();
     DFEVector<DFEVar> Std  = FwdCalc.getStd();
     DFEVar isFwdValid      = FwdCalc.isValid();

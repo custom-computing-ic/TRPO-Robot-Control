@@ -13,6 +13,7 @@ class Def {
     ///////////////////////// Parameters /////////////////////////
 
     // Global Settings
+    // NOTE the current Lightweight Simulator does not support arbitrary input layer parallelism - fixed at 4
     public static final int NumLayers      = 4;
     public static final int BufferDepth    = 2;
     public static final char [] AcFunc     = {'l', 't', 't', 'l'};
@@ -25,6 +26,36 @@ class Def {
     public static final int EpisodeLen  = 4;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
     public static final int NumLightweightSimulators = 1;
+
+    // pi - for Gaussian Random Number generation
+    public static final double pi = 3.1415926535897931;
+
+    // Initial Values: Theta
+    public static final double theta_1 = 0;
+    public static final double theta_2 = -pi/2.0;
+    public static final double theta_3 = pi/2.0;
+
+    // DOF1 - Fixed
+    public static final double DOF1_x = 0;
+    public static final double DOF1_y = 0;
+    public static final double DOF1_z = 0.01768;
+
+    // DOF2
+    public static final double DOF2_x = 0;
+    public static final double DOF2_y = 0;
+    public static final double DOF2_z = 0.07518;
+
+    // Wrist
+    public static final double Wrist_x = 0.07375;
+    public static final double Wrist_y = 0;
+    public static final double Wrist_z = 0.07518;
+
+    // Grip
+    public static final double Grip_x  = 0.11315;
+    public static final double Grip_y  = 0;
+    public static final double Grip_z  = 0.06268;
+
+    // Note: Object is randomly initialised
 
 
     ///////////////////////// FPGA Settings /////////////////////////

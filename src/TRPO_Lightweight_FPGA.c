@@ -486,7 +486,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             // DOF1 - Fixed
             double DOF1_x = 0;
             double DOF1_y = 0;
-            double DOF1_z = 0.01768;            
+            double DOF1_z = 0.01768;
 
             // DOF2
             double DOF2_x = 0;
@@ -496,12 +496,12 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             // Wrist
             double Wrist_x = 0.07375;
             double Wrist_y = 0;
-            double Wrist_z = 0.07518;            
+            double Wrist_z = 0.07518;
 
             // Grip
             double Grip_x  = 0.11315;
             double Grip_y  = 0;
-            double Grip_z  = 0.06268;            
+            double Grip_z  = 0.06268;
 
             // Object - Random Position fixed for each Episode
             double Object_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084;
