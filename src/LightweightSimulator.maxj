@@ -19,14 +19,16 @@ class LightweightSimulator extends KernelLib {
     private DFEVector<DFEVar> Observ;
     private DFEVector<DFEVar> Action;
     private DFEVar Reward;
-    private DFEVar OutputValid;
+    private DFEVar ObservValid;
+    private DFEVar ActionRewardValid;
 
     public DFEVector<DFEVar> getMean()      {return Mean;}
     public DFEVector<DFEVar> getStd()       {return Std;}
     public DFEVector<DFEVar> getObserv()    {return Observ;}
     public DFEVector<DFEVar> getAction()    {return Action;}
     public DFEVar getReward()               {return Reward;}
-    public DFEVar isValid()                 {return OutputValid;}
+    public DFEVar isObservValid()           {return ObservValid;}
+    public DFEVar isActionRewardValid()     {return ActionRewardValid;}
 
 
     LightweightSimulator(   KernelLib owner,
@@ -111,10 +113,10 @@ class LightweightSimulator extends KernelLib {
 	DFEVar URand1 = Prefix0.cat(UniformRandomNumber128Bit.slice(40, 31)).cast(dfeFix(1, 31, SignMode.UNSIGNED));
 	DFEVar URand2 = Prefix0.cat(UniformRandomNumber128Bit.slice(80, 31)).cast(dfeFix(1, 31, SignMode.UNSIGNED));
 
-    // Generating Random Object Positions Object_x = 0.147854, Object_y = -0.010562, Object_z = 0.078310
-    DFEVar Object_x = constant.var(Def.DataType, 0.147854); //URand0.cast(Def.DataType) * 0.076 + 0.084;
-    DFEVar Object_y = constant.var(Def.DataType, -0.010562); //URand1.cast(Def.DataType) * 0.100 - 0.050;
-    DFEVar Object_z = constant.var(Def.DataType, 0.078310); //URand2.cast(Def.DataType) * 0.100;
+    // Generating Random Object Positions
+    DFEVar Object_x = URand0.cast(Def.DataType) * 0.076 + 0.084;
+    DFEVar Object_y = URand1.cast(Def.DataType) * 0.100 - 0.050;
+    DFEVar Object_z = URand2.cast(Def.DataType) * 0.100;
 
 
     /////////////////////// Observation ///////////////////////
@@ -299,28 +301,35 @@ class LightweightSimulator extends KernelLib {
     Observ[14] <== Observ_32;
     
     // Calculating Reward
-    DFEVar Reward_x = (Grip_x_new - Observ_30).cast(Def.RewardType) * 10;
-    DFEVar Reward_y = (Grip_y_new - Observ_31).cast(Def.RewardType) * 10;
-    DFEVar Reward_z = (Grip_z_new - Observ_32).cast(Def.RewardType) * 10;
+    DFEVar Reward_x = KernelMath.abs(Grip_x_new - Observ_30).cast(Def.RewardType) * 10;
+    DFEVar Reward_y = KernelMath.abs(Grip_y_new - Observ_31).cast(Def.RewardType) * 10;
+    DFEVar Reward_z = KernelMath.abs(Grip_z_new - Observ_32).cast(Def.RewardType) * 10;
     DFEVar Reward_Distance = Reward_x * Reward_x + Reward_y * Reward_y + Reward_z * Reward_z;
-    DFEVar Reward_Action   = Action[0] * Action[0] + Action[1] * Action[1] + Action[2] * Action[2];
-    Reward = - Reward_Distance.cast(Def.DataType) - Reward_Action;
+    DFEVar Action_0 = KernelMath.abs(Action[0]).cast(Def.RewardType);
+    DFEVar Action_1 = KernelMath.abs(Action[1]).cast(Def.RewardType);
+    DFEVar Action_2 = KernelMath.abs(Action[2]).cast(Def.RewardType);
+    DFEVar Reward_Action   = Action_0 * Action_0 + Action_1 * Action_1 + Action_2 * Action_2;
+    Reward = - Reward_Distance.cast(Def.DataType) - Reward_Action.cast(Def.DataType);
 
-    // Is Output Valid
-    OutputValid = isFwdValid;
+    // Is Observ Valid
+    ObservValid = beginFwdProp;
+
+    // Is Action Reward Valid
+    ActionRewardValid = isFwdValid;
 
 
     /////////////////////// Debug ///////////////////////
 
     // Debug
     DFEVar Tick = control.count.simpleCounter(32);
-    debug.simPrintf(beginFwdProp, "[%4d] Begin Simulation Sample[%d]\n", Tick, OuterLoopCount);
+//    debug.simPrintf("[%4d] Uniform Rand = (%f, %f, %f), Gaussian Rand = %f\n", Tick, URand0, URand1, URand2, GaussianRandomNumber);
+    debug.simPrintf(beginFwdProp, "[%4d] Simulator %2d Begin Simulation Sample[%d]\n", Tick, ID, OuterLoopCount);
 //    debug.simPrintf(beginFwdProp, "[%4d] theta = (%f, %f, %f)\n", Tick, theta_1, theta_2, theta_3);
 //    for(int i=0; i<15; ++i) debug.simPrintf(beginFwdProp, "[%4d] Input Observ[%d] = %f\n", Tick, i, Observ[i]);
-    debug.simPrintf(isFwdValid, "[%4d] Grip = (%f, %f, %f), Object = (%f, %f, %f)\n", Tick, Grip_x_new, Grip_y_new, Grip_z_new, Observ_30, Observ_31, Observ_32);
-    debug.simPrintf(isFwdValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f) => Action = (%f, %f, %f) => Reward_Dist = %f, Reward_Ac = %f, Reward = %f\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2], Action[0], Action[1], Action[2], -Reward_Distance, -Reward_Action, Reward);
+//    debug.simPrintf(isFwdValid, "[%4d] Grip = (%f, %f, %f), Object = (%f, %f, %f)\n", Tick, Grip_x_new, Grip_y_new, Grip_z_new, Observ_30, Observ_31, Observ_32);
+//    debug.simPrintf(isFwdValid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f) => Action = (%f, %f, %f) => |Reward_Dist| = %f, |Reward_Ac| = %f, Reward = %f\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2], Action[0], Action[1], Action[2], Reward_Distance, Reward_Action, Reward);
 //    debug.simPrintf(isFwdValid, "[%4d] Output Observ[3:11] = (%f, %f, %f, %f, %f, %f, %f, %f, %f)\n", Tick, Observ[3], Observ[4], Observ[5], Observ[6], Observ[7], Observ[8], Observ[9], Observ[10], Observ[11]);
-    debug.simPrintf(EnObservUpdate, "[%4d] Observation State Updated\n", Tick);
+//    debug.simPrintf(EnObservUpdate, "[%4d] Observation State Updated\n", Tick);
 
     }
 

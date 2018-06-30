@@ -23,10 +23,10 @@ class Def {
     public static final int ActionSpaceDim = 3;
 
     // Lightweight Simulator
-    public static final int NumEpisodes = 1;
+    public static final int NumEpisodes = 4;
     public static final int EpisodeLen  = 4;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
-    public static final int NumLightweightSimulators = 1;
+    public static final int NumLightweightSimulators = 4;
     public static final double TimeStepLen = 0.02;
 
     // pi - for Gaussian Random Number generation
@@ -68,7 +68,7 @@ class Def {
     public static final double PipelineFactorMult    = 1.0;
     public static final double PipelineFactorDefault = 1.0;
 
-    public static final int ForwardKinematicsCalcLatency = 300;
+    public static final int ForwardKinematicsCalcLatency = 260;
 
 
     ///////////////////////// Data Types /////////////////////////
@@ -100,7 +100,7 @@ class Def {
     public static final DFEType AcExpType = KernelLib.dfeFix(26, FracBits, SignMode.UNSIGNED);
 
     // For Reward Calculation - need a few more fractional bits to avoid cancellation
-    public static final DFEType RewardType = KernelLib.dfeFix(5, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType RewardType = KernelLib.dfeFix(4, FracBits, SignMode.UNSIGNED);
 
 
     ///////////////////////// Software Utility Functions /////////////////////////

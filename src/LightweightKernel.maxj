@@ -27,6 +27,17 @@ class LightweightKernel extends Kernel {
     DFEVectorType<DFEVar> InVecType = new DFEVectorType<DFEVar>(Def.InputType, NumBlocks[0]);
     DFEVectorType<DFEVar> ObVecType = new DFEVectorType<DFEVar>(Def.DataType, NumBlocks[0]);
 
+    DFEVectorType<DFEVar> ObservVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.NumLightweightSimulators);
+    DFEVectorType<DFEVar> ActionVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.NumLightweightSimulators);
+    DFEVectorType<DFEVector<DFEVar>> ObservGridVecType = new DFEVectorType<DFEVector<DFEVar>>(ObservVecType, Def.ObservSpaceDim);
+    DFEVectorType<DFEVector<DFEVar>> ActionGridVecType = new DFEVectorType<DFEVector<DFEVar>>(ActionVecType, Def.ActionSpaceDim);
+    DFEVectorType<DFEVar> RewardVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.NumLightweightSimulators);
+
+    DFEVectorType<DFEVar> FixObVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ObservSpaceDim);
+    DFEVectorType<DFEVar> FixAcVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
+    DFEVectorType<DFEVar> OutObVecType = new DFEVectorType<DFEVar>(Def.InputType, Def.ObservSpaceDim);
+    DFEVectorType<DFEVar> OutAcVecType = new DFEVectorType<DFEVar>(Def.InputType, Def.ActionSpaceDim);
+
     // Calculate BlockDim
     int [] BlockDim = new int[NumLayers];
     for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
@@ -55,9 +66,7 @@ class LightweightKernel extends Kernel {
     
    
     /////////////////////// Control - Initialisation ///////////////////////
-    
-    // TODO Time-Multiplexing of Multiple Lightweight Simulators
-    
+
     // Overall Control
     DFEVar Tick = control.count.simpleCounter(32);
     DFEVar beginInit       = (Tick === 1);
@@ -116,20 +125,76 @@ class LightweightKernel extends Kernel {
 
     /////////////////////// Lightweight Simulator ///////////////////////
 
-    LightweightSimulator LW1 = new LightweightSimulator(this, 0, WeightInitData, BiasStdInitData, beginInit, beginSimulation);
-    DFEVector<DFEVar> Mean   = LW1.getMean();
-    DFEVector<DFEVar> Std    = LW1.getStd();
-    DFEVector<DFEVar> Observ = LW1.getObserv();
-    DFEVector<DFEVar> Action = LW1.getAction();
-    DFEVar Reward = LW1.getReward();
-    DFEVar isLW1Valid = LW1.isValid();
+    DFEVector<DFEVector<DFEVar>> ObservGridVec = ObservGridVecType.newInstance(this);
+    DFEVector<DFEVector<DFEVar>>   MeanGridVec = ActionGridVecType.newInstance(this);
+    DFEVector<DFEVector<DFEVar>>    StdGridVec = ActionGridVecType.newInstance(this);
+    DFEVector<DFEVector<DFEVar>> ActionGridVec = ActionGridVecType.newInstance(this);
+    DFEVector<DFEVar> RewardVec = RewardVecType.newInstance(this);
+    
+    @SuppressWarnings("unchecked")
+    LightweightSimulator [] LW = new LightweightSimulator[Def.NumLightweightSimulators];
+    for (int i=0; i<Def.NumLightweightSimulators; ++i) {
+        DFEVar beginSimulation_i = stream.offset(beginSimulation, 16*i);
+        LW[i] = new LightweightSimulator(this, i, WeightInitData, BiasStdInitData, beginInit, beginSimulation_i);
+        DFEVector<DFEVar> Observ = LW[i].getObserv();
+        DFEVector<DFEVar>   Mean = LW[i].getMean();
+        DFEVector<DFEVar>    Std = LW[i].getStd();
+        DFEVector<DFEVar> Action = LW[i].getAction();
+        for (int dim=0; dim<Def.ObservSpaceDim; ++dim) ObservGridVec[dim][i] <== Observ[dim];
+        for (int dim=0; dim<Def.ActionSpaceDim; ++dim)   MeanGridVec[dim][i] <==   Mean[dim];
+        for (int dim=0; dim<Def.ActionSpaceDim; ++dim)    StdGridVec[dim][i] <==    Std[dim];
+        for (int dim=0; dim<Def.ActionSpaceDim; ++dim) ActionGridVec[dim][i] <== Action[dim];
+        RewardVec[i] <== LW[i].getReward();
+    }
 
 
-    /////////////////////// Output ///////////////////////
+    /////////////////////// Outputs ///////////////////////
 
-    // TODO The number of Reward Output is NumSamples - need to add control for time-multiplexing
-    DFEVar RewardData = Reward;
-    io.output("Reward", RewardData.cast(Def.InputType), Def.InputType, isLW1Valid);
+    // Observ Selection Signal
+    DFEVar ObservSelection = LW[0].isObservValid();
+    for (int i=1; i<Def.NumLightweightSimulators; ++i) {
+        ObservSelection = LW[i].isObservValid().cat(ObservSelection);
+    }
+    ObservSelect = ObservSelection.cast(dfeUInt(Def.NumLightweightSimulators));
+
+    // Mean Std Action Reward Selection Signal
+    DFEVar ActionRewardSelection = LW[0].isActionRewardValid();
+    for (int i=1; i<Def.NumLightweightSimulators; ++i) {
+        ActionRewardSelection = LW[i].isActionRewardValid().cat(ActionRewardSelection);
+    }
+    ActionRewardSelect = ActionRewardSelection.cast(dfeUInt(Def.NumLightweightSimulators));
+
+    // Observation Output
+    DFEVector<DFEVar> FixObservVec = FixObVecType.newInstance(this);
+    for (int dim=0; dim<Def.ObservSpaceDim; ++dim) {
+        FixObservVec[dim] <== control.oneHotMux(ObservSelect, ObservGridVec[dim].getElementsAsList());
+    }
+    DFEVector<DFEVar> OutObservVec = FixObservVec.cast(OutObVecType);
+
+    // Mean Std Action Output
+    DFEVector<DFEVar>   FixMeanVec = FixAcVecType.newInstance(this);
+    DFEVector<DFEVar>    FixStdVec = FixAcVecType.newInstance(this);
+    DFEVector<DFEVar> FixActionVec = FixAcVecType.newInstance(this);
+    for (int dim=0; dim<Def.ActionSpaceDim; ++dim) {
+          FixMeanVec[dim] <== control.oneHotMux(ActionRewardSelect,   MeanGridVec[dim].getElementsAsList());
+           FixStdVec[dim] <== control.oneHotMux(ActionRewardSelect,    StdGridVec[dim].getElementsAsList());
+        FixActionVec[dim] <== control.oneHotMux(ActionRewardSelect, ActionGridVec[dim].getElementsAsList());
+    }
+    DFEVector<DFEVar>   OutMeanVec = FixMeanVec.cast(OutAcVecType);
+    DFEVector<DFEVar>    OutStdVec = FixStdVec.cast(OutAcVecType);
+    DFEVector<DFEVar> OutActionVec = FixActionVec.cast(OutAcVecType);
+
+    // Reward Output
+    DFEVar FixReward = control.oneHotMux(ActionRewardSelect, RewardVec.getElementsAsList());
+    DFEVar OutReward = FixReward.cast(Def.InputType);
+
+    // Output Control Signal
+    DFEVar EnObservOutput = (ObservSelect !== 0);
+    DFEVar EnActionRewardOutput = (ActionRewardSelect !== 0);
+
+
+
+    io.output("Reward", OutReward, Def.InputType, EnActionRewardOutput);
 
     //debug.simPrintf(isLW1Valid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
 
