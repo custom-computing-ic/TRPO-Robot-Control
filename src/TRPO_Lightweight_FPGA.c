@@ -54,10 +54,10 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     size_t pos;
 
     // Number of Episodes per Batch
-    const int NumEpBatch = 1;   // 20
+    const int NumEpBatch = 4;   // 20
     
     // Length of Each Episode - timestep_limit
-    const int EpLen = 4;  // 150
+    const int EpLen = 10;  // 150
 
     // Number of Samples
     size_t NumSamples = NumEpBatch * EpLen;
@@ -125,8 +125,8 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     double * Return    = (double *) calloc(NumSamples, sizeof(double));
     double * Baseline  = (double *) calloc(NumSamples, sizeof(double));
     double * Advantage = (double *) calloc(NumSamples, sizeof(double));
-    
-    
+
+
     //////////////////// Memory Allocation - Ordinary Forward and Backward Propagation ////////////////////
 
     // Layer[i] : Memory of each layer's outputs, i.e. y_i
@@ -355,7 +355,6 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     LBFGS_Param.max_iterations = 25;
 
 
-
     //////////////////// Initialisation - FPGA ////////////////////
 
 
@@ -371,7 +370,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     for (int i=0; i<NumLayers; ++i) BlockDim[i] = PaddedLayerSize[i] / NumBlocks[i];
 
     // WeightInit Vector
-    int WeightInitVecLength = 0;
+    size_t WeightInitVecLength = 0;
     for (size_t i=0; i<NumLayers-1; ++i) {
         WeightInitVecLength += BlockDim[i] * PaddedLayerSize[i+1];
     }
@@ -382,36 +381,6 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     double * WeightInit = (double *) calloc(WeightInitVecItems, sizeof(double));
     fprintf(stderr,"[INFO] WeightInit Vector Size = %zu bytes.\n", WeightInitVecItems * sizeof(double));
 
-    
-    // Feed Weight into WeightInit
-    size_t RowNum = 0;
-    for (size_t ID=0; ID<NumLayers-1; ++ID) {
-        // Parameters of current
-        size_t   InBlockDim = BlockDim[ID];
-        size_t  NumInBlocks = NumBlocks[ID];
-        size_t  OutBlockDim = BlockDim[ID+1];
-        size_t NumOutBlocks = NumBlocks[ID+1];
-        size_t OutLayerSize = LayerSize[ID+1];
-        // Feed Weight of Layer[ID]
-        for (size_t Y=0; Y<NumOutBlocks; ++Y) {
-            for (size_t addrX=0; addrX<InBlockDim; ++addrX) {
-                for (size_t addrY=0; addrY<OutBlockDim; ++addrY) {
-                    for (int X=0; X<NumInBlocks; ++X) {
-                        size_t RowNumPadded = X*InBlockDim + addrX;
-                        size_t RowNumLimit  = LayerSize[ID];
-                        size_t ColNumPadded = Y*OutBlockDim + addrY;
-                        size_t ColNumLimit  = LayerSize[ID+1];
-                        if ( (RowNumPadded < RowNumLimit) && (ColNumPadded < ColNumLimit) ) {
-                            WeightInit[RowNum*WeightInitVecWidth+X] = W[ID][RowNumPadded*OutLayerSize + ColNumPadded];
-                        }
-                        else WeightInit[RowNum*WeightInitVecWidth+X] = 0;
-                    }
-                    RowNum++;
-                }
-            }
-        }
-    }
-
     // Length of BiasStd Vector
     size_t BiasStdVecLength = PaddedLayerSize[NumLayers-1];
     for (size_t i=1; i<NumLayers; ++i) {
@@ -419,25 +388,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     }
     double * BiasStd = (double *) calloc(BiasStdVecLength, sizeof(double));
     fprintf(stderr, "[INFO] BiasStd Vector Size = %zu bytes.\n", BiasStdVecLength * sizeof(double));
-     
-    // Feed Bias into BiasStd
-    RowNum = 0;
-    for (size_t ID=0; ID<NumLayers-1; ++ID) {
-        size_t nextLayerDim = PaddedLayerSize[ID+1];
-        size_t nextLayerDimLimit = LayerSize[ID+1];
-        for (size_t k=0; k<nextLayerDim; ++k) {
-            if (k<nextLayerDimLimit) BiasStd[RowNum] = B[ID][k];
-            else BiasStd[RowNum] = 0;
-            RowNum++;
-        }
-    }
-    // Feed Std into BiasStd
-    for (size_t k=0; k<PaddedLayerSize[NumLayers-1]; ++k) {
-        size_t LayerDimLimit = LayerSize[NumLayers-1];
-        if (k<LayerDimLimit) BiasStd[RowNum] = exp(LogStd[k]);
-        else BiasStd[RowNum] = 0;
-        RowNum++;
-    }
+
 
 
     //////////////////// FPGA - Run Lightweight Simulator ////////////////////
@@ -451,19 +402,6 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
 */
 
 
-
-    TRPO_RunLightweight_actions_t simulation_action;
-    simulation_action.instream_WeightInit  = WeightInit;   // 4608 bytes
-    simulation_action.instream_BiasStdInit = BiasStd;      // 320 bytes
-    simulation_action.outstream_Reward     = Reward;
-    TRPO_RunLightweight_run(engine, &simulation_action);
-
-
-    // Free Engine and Maxfile
-    max_unload(engine);
-    TRPO_free();
-
-
     //////////////////// Main Loop ////////////////////
 
     // Tic
@@ -472,216 +410,72 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
 
     // Run Training for NumIter Iterations
     for (int iter=0; iter<NumIter; ++iter) {
-    
-        // Run Training for several Episodes in each Iteration - can be parallelised
-        for (int ep=0; ep<NumEpBatch; ++ep) {
 
-            ///////// Reset Environment /////////
+        ///////// Lightweight Simulation on FPGA /////////
 
-            // Theta
-            double theta_1 = 0;
-            double theta_2 = -pi/2.0;
-            double theta_3 = pi/2.0;
-
-            // DOF1 - Fixed
-            double DOF1_x = 0;
-            double DOF1_y = 0;
-            double DOF1_z = 0.01768;
-
-            // DOF2
-            double DOF2_x = 0;
-            double DOF2_y = 0;
-            double DOF2_z = 0.07518;
-            
-            // Wrist
-            double Wrist_x = 0.07375;
-            double Wrist_y = 0;
-            double Wrist_z = 0.07518;
-
-            // Grip
-            double Grip_x  = 0.11315;
-            double Grip_y  = 0;
-            double Grip_z  = 0.06268;
-
-            // Object - Random Position fixed for each Episode
-            double Object_x = ((double)rand()/(double)RAND_MAX) * 0.076 + 0.084;
-            double Object_y = ((double)rand()/(double)RAND_MAX) * 0.100 - 0.05;
-            double Object_z = ((double)rand()/(double)RAND_MAX) * 0.100;
-
-
-            printf("Object_x = %f, Object_y = %f, Object_z = %f\n", Object_x, Object_y, Object_z);
-
-            ///////// Rollout Several Time Steps in Each Episode /////////
-            
-            for(int timeStep=0; timeStep<EpLen; ++timeStep) {
-            
-                // Row Address of the Simulation Data
-                int RowAddr = ep * EpLen + timeStep;
-                
-                // Get Raw Observation Vector: DOF1 DOF2 Wrist Grip Object
-                ob[0] = DOF1_x;
-                ob[1] = DOF1_y;
-                ob[2] = DOF1_z;
-                ob[3] = DOF2_x;
-                ob[4] = DOF2_y;
-                ob[5] = DOF2_z;
-                ob[6] = Wrist_x;
-                ob[7] = Wrist_y;
-                ob[8] = Wrist_z;
-                ob[9] = Grip_x;
-                ob[10] = Grip_y;
-                ob[11] = Grip_z;
-                ob[12] = Object_x;
-                ob[13] = Object_y;
-                ob[14] = Object_z;
-
-
-                // Save Data to Observation Matrix
-                for (int i=0; i<ObservSpaceDim; ++i) Observ[RowAddr*ObservSpaceDim+i] = ob[i];
-
-                if (timeStep<4) {
-//                    for (int i=3; i<12; ++i) printf("%f ", ob[i]);
-                    printf("\n");
-                }
-                
-                ///////// Forward Propagation /////////
-                
-                // Assign Input Values
-                for (size_t i=0; i<ObservSpaceDim; ++i) Layer[0][i] = ob[i];
-    
-                // Forward Propagation
-                for (size_t i=0; i<NumLayers-1; ++i) {
-            
-                    // Propagate from Layer[i] to Layer[i+1]
-                    for (size_t j=0; j<LayerSize[i+1]; ++j) {
-                
-                        // Calculating pre-activated value for item[j] in next layer
-                        Layer[i+1][j] = B[i][j];
-                        for (size_t k=0; k<LayerSize[i]; ++k) {
-                            // From Neuron #k in Layer[i] to Neuron #j in Layer[i+1]
-                            Layer[i+1][j] += Layer[i][k] * W[i][k*LayerSize[i+1]+j];
-                        }
-            
-                        // Apply Activation Function
-                        switch (AcFunc[i+1]) {
-                            // Linear Activation Function: Ac(x) = (x)
-                            case 'l': {break;}
-                            // tanh() Activation Function
-                            case 't': {Layer[i+1][j] = tanh(Layer[i+1][j]); break;}
-                            // 0.1x Activation Function
-                            case 'o': {Layer[i+1][j] = 0.1*Layer[i+1][j]; break;}
-                            // sigmoid Activation Function
-                            case 's': {Layer[i+1][j] = 1.0/(1+exp(-Layer[i+1][j])); break;}
-                            // Default: Activation Function not supported
-                            default: {
-                                printf("[ERROR] Activation Function for Layer [%zu] is %c. Unsupported.\n", i+1, AcFunc[i+1]);
-                                return -1;
+        // Feed Weight into WeightInit
+        size_t RowNum = 0;
+        for (size_t ID=0; ID<NumLayers-1; ++ID) {
+            // Parameters of current
+            size_t   InBlockDim = BlockDim[ID];
+            size_t  NumInBlocks = NumBlocks[ID];
+            size_t  OutBlockDim = BlockDim[ID+1];
+            size_t NumOutBlocks = NumBlocks[ID+1];
+            size_t OutLayerSize = LayerSize[ID+1];
+            // Feed Weight of Layer[ID]
+            for (size_t Y=0; Y<NumOutBlocks; ++Y) {
+                for (size_t addrX=0; addrX<InBlockDim; ++addrX) {
+                    for (size_t addrY=0; addrY<OutBlockDim; ++addrY) {
+                        for (int X=0; X<NumInBlocks; ++X) {
+                            size_t RowNumPadded = X*InBlockDim + addrX;
+                            size_t RowNumLimit  = LayerSize[ID];
+                            size_t ColNumPadded = Y*OutBlockDim + addrY;
+                            size_t ColNumLimit  = LayerSize[ID+1];
+                            if ( (RowNumPadded < RowNumLimit) && (ColNumPadded < ColNumLimit) ) {
+                                WeightInit[RowNum*WeightInitVecWidth+X] = W[ID][RowNumPadded*OutLayerSize + ColNumPadded];
                             }
+                            else WeightInit[RowNum*WeightInitVecWidth+X] = 0;
                         }
+                        RowNum++;
                     }
                 }
-                
-                // Save Data to Mean Matrix
-                for (int i=0; i<ActionSpaceDim; ++i) Mean[RowAddr*ActionSpaceDim+i] = Layer[NumLayers-1][i];
+            }
+        }
 
-                // For Debug
-                if (timeStep<4) {
-//                    printf("CPU Mean = %f %f %f \n", Layer[NumLayers-1][0], Layer[NumLayers-1][1], Layer[NumLayers-1][2]);
-                }
-                
-                // Save Data to Std Vector
-                for (int i=0; i<ActionSpaceDim; ++i) Std[i] = exp(LogStd[i]);
-                
-                // Get Action from Mean - Sample from the distribution
-                for (int i=0; i<ActionSpaceDim; ++i) {
-                    // Box-Muller
-                    double u1 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
-                    double u2 = ((double)rand() + 1.0) / ((double)RAND_MAX + 1.0);
-                    double z0 = sqrt(-2.0 * log(u1)) * cos(2*pi*u2);
-                    //double z1 = sqrt(-2.0 * log(u1)) * sin(2*pi*u2);
-                    
-                    // N(mu, sigma^2) = N(0,1) * sigma + mu
-                    ac[i] = z0 * Std[i] + Layer[NumLayers-1][i];
-                }
+        // Feed Bias into BiasStd
+        RowNum = 0;
+        for (size_t ID=0; ID<NumLayers-1; ++ID) {
+            size_t nextLayerDim = PaddedLayerSize[ID+1];
+            size_t nextLayerDimLimit = LayerSize[ID+1];
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                if (k<nextLayerDimLimit) BiasStd[RowNum] = B[ID][k];
+                else BiasStd[RowNum] = 0;
+                RowNum++;
+            }
+        }
 
-                // For debug
-                if (timeStep==0) {ac[0] = -1.336706; ac[1] = -0.754209; ac[2] = -0.214136;}
-                if (timeStep==1) {ac[0] = 0.522698;  ac[1] = -0.091836; ac[2] = 0.090208;}
-                if (timeStep==2) {ac[0] = -1.307456; ac[1] = 0.268253;  ac[2] = -0.916509;}
-                if (timeStep==3) {ac[0] = -0.325344; ac[1] = 0.916386;  ac[2] = -0.371073;}
+        // Feed Std into BiasStd
+        for (size_t k=0; k<PaddedLayerSize[NumLayers-1]; ++k) {
+            size_t LayerDimLimit = LayerSize[NumLayers-1];
+            if (k<LayerDimLimit) BiasStd[RowNum] = exp(LogStd[k]);
+            else BiasStd[RowNum] = 0;
+            RowNum++;
+        }
 
-                // Save Data to Action Matrix
-                for (int i=0; i<ActionSpaceDim; ++i) Action[RowAddr*ActionSpaceDim+i] = ac[i];
+        // Run Lightweight Simulator on FPGA
+        TRPO_RunLightweight_actions_t simulation_action;
+        simulation_action.instream_WeightInit  = WeightInit;   // 4608 bytes
+        simulation_action.instream_BiasStdInit = BiasStd;      // 320 bytes
+        simulation_action.outstream_Observ     = Observ;
+        simulation_action.outstream_Mean       = Mean;
+        simulation_action.outstream_Action     = Action;
+        simulation_action.outstream_Reward     = Reward;
+        TRPO_RunLightweight_run(engine, &simulation_action);
 
-
-                ///////// Lightweight Simulator /////////
-
-                // Update Theta
-                theta_1 += ac[0] * coeff * TimeStepLen;
-                theta_2 += ac[1] * coeff * TimeStepLen;
-                theta_3 += ac[2] * coeff * TimeStepLen;
-                
-                double s1 = sin(theta_1);
-                double c1 = cos(theta_1);
-                double s2 = sin(theta_2);
-                double c2 = cos(theta_2);
-                double s3 = sin(theta_3);
-                double c3 = cos(theta_3);
-                
-                double c2c3 = c2 * c3;
-                double s2s3 = s2 * s3;
-                double c2s3 = c2 * s3;
-                double s2c3 = s2 * c3;
-                
-                // DOF1 and Object positions are fixed
-                
-                // DOF2
-                DOF2_x = 0.0575 * c1 * c2;
-                DOF2_y = 0.0575 * s1 * c2;
-                DOF2_z = 0.01768 - 0.0575 * s2;
-                
-                // Wrist
-                Wrist_x = DOF2_x + 0.07375 * c1 * (c2c3 - s2s3);
-                Wrist_y = DOF2_y + 0.07375 * s1 * (c2c3 - s2s3);
-                Wrist_z = DOF2_z - 0.07375 * (c2s3 + s2c3);
-                
-                // Grip
-                Grip_x  = DOF2_x + 0.11315 * c1 * (c2c3 - s2s3) - 0.0125 * c1 * (c2s3 + s2c3);
-                Grip_y  = DOF2_y + 0.11315 * s1 * (c2c3 - s2s3) - 0.0125 * s1 * (c2s3 + s2c3);
-                Grip_z  = DOF2_z - 0.11315 * (c2s3 + s2c3) + 0.0125 * (s2s3 - c2c3);
-
-        
-                // Get Position of the Grip and the Object
-                double   gripPos[3] = {Grip_x, Grip_y, Grip_z};
-                double objectPos[3] = {Object_x, Object_y, Object_z};
-
-                // For debug
-                printf("Grip = (%f, %f, %f), Object = (%f, %f, %f)\n", Grip_x, Grip_y, Grip_z, Object_x, Object_y, Object_z);
+        // Feed LogStd into Std
+        for (int i=0; i<ActionSpaceDim; ++i) Std[i] = exp(LogStd[i]);
 
 
-                ///////// Calculating Reward /////////
-                
-                // Reward Function  TODO Modify Reward Function with -Eculidean Distance - Action Norm?
-                double re = 0;
-                for (int i=0; i<3; ++i) {
-                    re -= 100 * (objectPos[i] - gripPos[i]) * (objectPos[i] - gripPos[i]);
-//                    re -= ac[i] * ac[i];
-                }
-                double re_dist = re;
-                for (int i=0; i<3; ++i) re -= ac[i] * ac[i];
-                
-                // Save Reward to Reward Vector
-                Reward[RowAddr] = re;
-                
-                if (timeStep<4) {
-                    printf("Reward_Distance = %f, Reward_Action = %f, Reward = %f\n", re_dist, re - re_dist, re);
-                }
-            
-            } // End of Episode
-        
-        }  // End of the Lightweight Simulation
-
-        
         ///////// Calculate Reward Statistics  /////////
         
         double EpRewMean = 0;
@@ -1697,6 +1491,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     free(Observ); free(Mean); free(Std); free(Action); free(Reward); free(Return); free(Baseline); free(Advantage);
     
     // FPGA
+    
     free(BlockDim); free(WeightInit); free(BiasStd);
     
     

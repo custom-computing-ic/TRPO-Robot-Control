@@ -72,6 +72,9 @@ public class TRPOManager extends CustomManager{
         KernelBlock LKernel = addKernel(new LightweightKernel(makeKernelParameters(LightweightKernel_Name)));
         LKernel.getInput("WeightInit")  <== addStreamFromCPU("WeightInit");
         LKernel.getInput("BiasStdInit") <== addStreamFromCPU("BiasStdInit");
+        addStreamToCPU("Observ")        <== LKernel.getOutput("Observ");
+        addStreamToCPU("Mean")          <== LKernel.getOutput("Mean");
+        addStreamToCPU("Action")        <== LKernel.getOutput("Action");
         addStreamToCPU("Reward")        <== LKernel.getOutput("Reward");
 
     }
@@ -112,7 +115,9 @@ public class TRPOManager extends CustomManager{
 
         ///////////////////////// Outputs /////////////////////////
 
-        // Reward
+        ei.setStream("Observ", CPUTypes.DOUBLE, CPUTypes.DOUBLE.sizeInBytes()*Def.NumSamples*Def.ObservSpaceDim);
+        ei.setStream("Mean",   CPUTypes.DOUBLE, CPUTypes.DOUBLE.sizeInBytes()*Def.NumSamples*Def.ActionSpaceDim);
+        ei.setStream("Action", CPUTypes.DOUBLE, CPUTypes.DOUBLE.sizeInBytes()*Def.NumSamples*Def.ActionSpaceDim);
         ei.setStream("Reward", CPUTypes.DOUBLE, CPUTypes.DOUBLE.sizeInBytes()*Def.NumSamples);
 
 

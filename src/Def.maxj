@@ -24,7 +24,7 @@ class Def {
 
     // Lightweight Simulator
     public static final int NumEpisodes = 4;
-    public static final int EpisodeLen  = 4;
+    public static final int EpisodeLen  = 10;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
     public static final int NumLightweightSimulators = 4;
     public static final double TimeStepLen = 0.02;

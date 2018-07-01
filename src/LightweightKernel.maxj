@@ -3,9 +3,6 @@ import com.maxeler.maxcompiler.v2.kernelcompiler.KernelParameters;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.base.DFEVar;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVector;
 import com.maxeler.maxcompiler.v2.kernelcompiler.types.composite.DFEVectorType;
-import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count;
-import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.Counter;
-import com.maxeler.maxcompiler.v2.kernelcompiler.stdlib.core.Count.WrapMode;
 
 
 class LightweightKernel extends Kernel {
@@ -64,8 +61,8 @@ class LightweightKernel extends Kernel {
     int NumSimulationRounds = Def.NumSamples / Def.NumLightweightSimulators;
     int NumSimulationCycles = NumSimulationRounds * SimulationCyclesPerSample;
     
-   
-    /////////////////////// Control - Initialisation ///////////////////////
+
+    /////////////////////// Control ///////////////////////
 
     // Overall Control
     DFEVar Tick = control.count.simpleCounter(32);
@@ -81,35 +78,6 @@ class LightweightKernel extends Kernel {
     DFEVar beginBiasStdInit = beginInit;
     AddrGenerator BiasStdInitCounter = new AddrGenerator(this, 1, BiasStdInitCycles, beginBiasStdInit);
     DFEVar isBiasStdInitiating = BiasStdInitCounter.isValid();
-
-
-    /////////////////////// Control - Simulation ///////////////////////
-
-    // Lightweight Simulation Control
-    AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, NumSimulationCycles, beginSimulation);
-    DFEVar isSimulating = LightweightSimulationCounter.isValid();
-
-    // Inner Loop - Counting the Simulation of a sample
-    // Note: When this counter wraps, it means the system is ready to simulate another sample
-    Count.Params InnerLoopCounterParam = control.count.makeParams(16)
-                                                  .withInitValue(0)
-                                                  .withMax(SimulationCyclesPerSample)
-                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
-                                                  .withReset(beginSimulation);
-    Counter InnerLoopCounter = control.count.makeCounter(InnerLoopCounterParam);
-    DFEVar InnerLoopCount = InnerLoopCounter.getCount();
-
-    // Outer Loop - Counting the number of Simulation Rounds
-    Count.Params OuterLoopCounterParam = control.count.makeParams(16)
-                                                  .withInitValue(0)
-                                                  .withEnable(InnerLoopCounter.getWrap())
-                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
-                                                  .withReset(beginSimulation);
-    Counter OuterLoopCounter = control.count.makeCounter(OuterLoopCounterParam);
-    DFEVar OuterLoopCount = OuterLoopCounter.getCount();
-
-    // Forward Propagation Control
-    DFEVar beginFwdProp = isSimulating & (InnerLoopCount === 0);
 
 
     /////////////////////// Input ///////////////////////
@@ -130,11 +98,11 @@ class LightweightKernel extends Kernel {
     DFEVector<DFEVector<DFEVar>>    StdGridVec = ActionGridVecType.newInstance(this);
     DFEVector<DFEVector<DFEVar>> ActionGridVec = ActionGridVecType.newInstance(this);
     DFEVector<DFEVar> RewardVec = RewardVecType.newInstance(this);
-    
-    @SuppressWarnings("unchecked")
+
+    // Lightweight Simulators
     LightweightSimulator [] LW = new LightweightSimulator[Def.NumLightweightSimulators];
     for (int i=0; i<Def.NumLightweightSimulators; ++i) {
-        DFEVar beginSimulation_i = stream.offset(beginSimulation, 16*i);
+        DFEVar beginSimulation_i = (Tick === WeightInitCycles + 16*i);
         LW[i] = new LightweightSimulator(this, i, WeightInitData, BiasStdInitData, beginInit, beginSimulation_i);
         DFEVector<DFEVar> Observ = LW[i].getObserv();
         DFEVector<DFEVar>   Mean = LW[i].getMean();
@@ -151,18 +119,18 @@ class LightweightKernel extends Kernel {
     /////////////////////// Outputs ///////////////////////
 
     // Observ Selection Signal
-    DFEVar ObservSelection = LW[0].isObservValid();
+    DFEVar ObservSelect = LW[0].isObservValid();
     for (int i=1; i<Def.NumLightweightSimulators; ++i) {
-        ObservSelection = LW[i].isObservValid().cat(ObservSelection);
+        ObservSelect = LW[i].isObservValid().cat(ObservSelect);
     }
-    ObservSelect = ObservSelection.cast(dfeUInt(Def.NumLightweightSimulators));
+    ObservSelect = ObservSelect.cast(dfeUInt(Def.NumLightweightSimulators));
 
     // Mean Std Action Reward Selection Signal
-    DFEVar ActionRewardSelection = LW[0].isActionRewardValid();
+    DFEVar ActionRewardSelect = LW[0].isActionRewardValid();
     for (int i=1; i<Def.NumLightweightSimulators; ++i) {
-        ActionRewardSelection = LW[i].isActionRewardValid().cat(ActionRewardSelection);
+        ActionRewardSelect = LW[i].isActionRewardValid().cat(ActionRewardSelect);
     }
-    ActionRewardSelect = ActionRewardSelection.cast(dfeUInt(Def.NumLightweightSimulators));
+    ActionRewardSelect = ActionRewardSelect.cast(dfeUInt(Def.NumLightweightSimulators));
 
     // Observation Output
     DFEVector<DFEVar> FixObservVec = FixObVecType.newInstance(this);
@@ -192,11 +160,16 @@ class LightweightKernel extends Kernel {
     DFEVar EnObservOutput = (ObservSelect !== 0);
     DFEVar EnActionRewardOutput = (ActionRewardSelect !== 0);
 
+    // Outputs
+    io.output("Observ", OutObservVec, OutObVecType,  EnObservOutput);
+    io.output("Mean",   OutMeanVec,   OutAcVecType,  EnActionRewardOutput);
+    io.output("Action", OutActionVec, OutAcVecType,  EnActionRewardOutput);
+    io.output("Reward", OutReward,    Def.InputType, EnActionRewardOutput);
 
 
-    io.output("Reward", OutReward, Def.InputType, EnActionRewardOutput);
+    /////////////////////// Debug ///////////////////////
 
-    //debug.simPrintf(isLW1Valid, "[%4d] Mean = (%f, %f, %f), Std = (%f, %f, %f)\n", Tick, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2]);
+    debug.simPrintf(EnActionRewardOutput, "[%4d] **** Mean = (%f, %f, %f), Std = (%f, %f, %f) **** \n", Tick, OutMeanVec[0], OutMeanVec[1], OutMeanVec[2], OutStdVec[0], OutStdVec[1], OutStdVec[2]);
 
     }
 
