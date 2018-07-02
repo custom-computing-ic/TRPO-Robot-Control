@@ -355,8 +355,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     LBFGS_Param.max_iterations = 25;
 
 
-    //////////////////// Initialisation - FPGA ////////////////////
-
+    //////////////////// Initialisation - FPGA Lightweight Simulator ////////////////////
 
 	// Load Maxfile and Engine
 	fprintf(stderr, "[INFO] Initialising FPGA...\n");
@@ -390,26 +389,90 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     fprintf(stderr, "[INFO] BiasStd Vector Size = %zu bytes.\n", BiasStdVecLength * sizeof(double));
 
 
+    //////////////////// Initialisation - FPGA Conjugate Gradient ////////////////////
 
-    //////////////////// FPGA - Run Lightweight Simulator ////////////////////
-/*
-    TRPO_WriteDRAM_actions_t write_action;
-    write_action.param_start_bytes = 0;
-    write_action.param_size_bytes = PaddedObservVecItems * sizeof(double);
-    write_action.instream_fromCPU = Observation;
-    TRPO_WriteDRAM_run(engine, &write_action);
-    fprintf(stderr, "[INFO] Loading Model... Done\n");    
-*/
+    // The Input Vector is to be multiplied with the Hessian Matrix of KL to derive the Fisher Vector Product
+    // There is one-to-one correspondence between the input vector and all trainable parameters in the neural network
+    // As a result, the shape of the Input Vector is the same as that of the parameters in the model
+    // The only difference is that the Input Vector is stored in a flattened manner
+    // There is one-to-one correspondence between: VW[i] and W[i], VB[i] and B[i], VStd[i] and Std[i]
+    double * VW [NumLayers-1];
+    double * VB [NumLayers-1];
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        VW[i] = (double *) calloc(LayerSize[i]*LayerSize[i+1], sizeof(double));
+        VB[i] = (double *) calloc(LayerSize[i+1], sizeof(double));
+    }
+    
+    // Allocate Memory for Input Vector corresponding to LogStd
+    double * VLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
+
+    // Length of Weight and VWeight Initialisation Vector
+    int WeightInitVecLength_CG = 2 * WeightInitVecLength;
+
+    // Number of Cycles to Run on FPGA - Pipelined Forward and Back Propagation
+    // Remarks: Here we assume 4 layers
+    size_t MaxBlkDim0Dim2     = (BlockDim[0]>BlockDim[2]) ? BlockDim[0] : BlockDim[2];
+    size_t FwdCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    size_t BwdCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    size_t CyclesPerSample    = (FwdCyclesPerSample>BwdCyclesPerSample) ? FwdCyclesPerSample : BwdCyclesPerSample;
+    size_t PropCyclesTotal    = CyclesPerSample * (NumSamples + 1);
+
+    // Number of Cycles to Run on FPGA - Read Result Back
+    size_t FVPLength = 0;
+    for (size_t i=0; i<NumLayers-1; ++i) {
+        FVPLength += PaddedLayerSize[i] * PaddedLayerSize[i+1];
+        FVPLength += PaddedLayerSize[i+1];
+    }
+    int PaddedFVPLength = ((int)ceil((double)FVPLength/2))*2;
+    
+    // Number of Cycles to Run on FPGA for Each FVP Computation - Total
+    size_t NumTicks = WeightInitVecLength_CG + PropCyclesTotal + PaddedFVPLength + 20;
+
+    // Allocation Memory Space for FVP Result
+    double * FVPResult = (double *) calloc(PaddedFVPLength, sizeof(double));
+
+    // Length of Observation Vector
+    // Remarks: DRAM Write requires data bit-size to be a multiple of 384bytes
+    //          Namely, the number of items must be a multiple of 48
+    size_t ObservVecLength = WeightInitVecLength_CG + NumSamples*BlockDim[0];
+    size_t ObservVecWidth  = NumBlocks[0];
+    size_t ActualObservVecItems = ObservVecLength * ObservVecWidth;
+    size_t PaddedObservVecItems = (size_t) 48 * ceil( (double)ActualObservVecItems/48 );
+    fprintf(stderr, "[INFO] Observation Vector (%zu bytes) padded to %zu bytes\n", ActualObservVecItems*8, PaddedObservVecItems*8);
+    double * Observation = (double *) calloc(PaddedObservVecItems, sizeof(double));
+
+    // Length of DataP Vector
+    // Remarks: DRAM Write requires data bit-size to be a multiple of 384bytes
+    //          Namely, the number of items must be a multiple of 48
+    size_t ActualDataPVecItems = WeightInitVecLength_CG * NumBlocks[0];
+    size_t PaddedDataPVecItems = (size_t) 48 * ceil( (double)ActualDataPVecItems/48 );
+    fprintf(stderr, "[INFO] Vector P (%zu bytes) padded to %zu bytes\n", ActualDataPVecItems*8, PaddedDataPVecItems*8);
+    double * DataP = (double *) calloc(PaddedDataPVecItems, sizeof(double));
+
+    // Number of Ticks for each CG iteration
+    fprintf(stderr, "[INFO] In each CG iteration FPGA will run for %zu cycles.\n", NumTicks);
+
+    // Length of BiasStd Vector
+    size_t BiasStdVecLength_CG = PaddedLayerSize[NumLayers-1];
+    for (size_t i=1; i<NumLayers; ++i) {
+        BiasStdVecLength_CG += 2*PaddedLayerSize[i];
+    }
+    double * BiasStd_CG = (double *) calloc(BiasStdVecLength_CG, sizeof(double));
 
 
     //////////////////// Main Loop ////////////////////
 
-    // Tic
-    struct timeval tv1, tv2;
-    gettimeofday(&tv1, NULL);
+    // Calculate Time
+    struct timeval tv1, tv2, tv3, tv4;
+    double runtimeS = 0;
+    double fpgaTime = 0;
+
 
     // Run Training for NumIter Iterations
     for (int iter=0; iter<NumIter; ++iter) {
+
+        // Tic
+        gettimeofday(&tv1, NULL);
 
         ///////// Lightweight Simulation on FPGA /////////
 
@@ -454,13 +517,15 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             }
         }
 
-        // Feed Std into BiasStd
+        // Feed LogStd into BiasStd
         for (size_t k=0; k<PaddedLayerSize[NumLayers-1]; ++k) {
             size_t LayerDimLimit = LayerSize[NumLayers-1];
             if (k<LayerDimLimit) BiasStd[RowNum] = exp(LogStd[k]);
             else BiasStd[RowNum] = 0;
             RowNum++;
         }
+
+        gettimeofday(&tv3, NULL);
 
         // Run Lightweight Simulator on FPGA
         TRPO_RunLightweight_actions_t simulation_action;
@@ -471,6 +536,10 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
         simulation_action.outstream_Action     = Action;
         simulation_action.outstream_Reward     = Reward;
         TRPO_RunLightweight_run(engine, &simulation_action);
+
+        gettimeofday(&tv4, NULL);
+        fpgaTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
+
 
         // Feed LogStd into Std
         for (int i=0; i<ActionSpaceDim; ++i) Std[i] = exp(LogStd[i]);
@@ -731,7 +800,6 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                 }
         
             }
-
         
             // Accumulate the Policy Gradient to b
             pos = 0;
@@ -781,9 +849,131 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             r[i] = b[i];
             rdotr += r[i] * r[i];
         }
-    
-        // Iterative Solver    
-        for (size_t it=0; it<=MaxIter; ++it) {
+
+        // Initialisation - FVP
+        pos = 0;
+        for (size_t i=0; i<NumLayers-1; ++i) {
+            size_t curLayerDim  = LayerSize[i];
+            size_t nextLayerDim = LayerSize[i+1];
+            for (size_t j=0; j<curLayerDim;++j) {
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    VW[i][j*nextLayerDim+k] = b[pos];
+                    pos++;
+                }
+            }
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                VB[i][k] = b[pos];
+                pos++;
+            }
+        }
+        for (size_t k=0; k<ActionSpaceDim; ++k) {
+            VLogStd[k] = b[pos];
+            pos++;
+        }
+
+
+        // Feed Weight and VWeight into Observation
+        RowNum = 0;
+        for (size_t ID=0; ID<NumLayers-1; ++ID) {
+            // Parameters of current
+            size_t   InBlockDim = BlockDim[ID];
+            size_t  NumInBlocks = NumBlocks[ID];
+            size_t  OutBlockDim = BlockDim[ID+1];
+            size_t NumOutBlocks = NumBlocks[ID+1];
+            size_t OutLayerSize = LayerSize[ID+1];
+            // Feed Weight of Layer[ID]
+            for (size_t Y=0; Y<NumOutBlocks; ++Y) {
+                for (size_t addrX=0; addrX<InBlockDim; ++addrX) {
+                    for (size_t addrY=0; addrY<OutBlockDim; ++addrY) {
+                        for (int X=0; X<NumInBlocks; ++X) {
+                            size_t RowNumPadded = X*InBlockDim + addrX;
+                            size_t RowNumLimit  = LayerSize[ID];
+                            size_t ColNumPadded = Y*OutBlockDim + addrY;
+                            size_t ColNumLimit  = LayerSize[ID+1];
+                            if ( (RowNumPadded < RowNumLimit) && (ColNumPadded < ColNumLimit) ) {
+                                Observation[RowNum*ObservVecWidth+X] = W[ID][RowNumPadded*OutLayerSize + ColNumPadded];
+                            }
+                            else Observation[RowNum*ObservVecWidth+X] = 0;
+                        }
+                        RowNum++;
+                    }
+                }
+            }
+            // Feed VWeight of Layer[ID]
+            for (size_t Y=0; Y<NumOutBlocks; ++Y) {
+                for (size_t addrX=0; addrX<InBlockDim; ++addrX) {
+                    for (size_t addrY=0; addrY<OutBlockDim; ++addrY) {
+                        for (size_t X=0; X<NumInBlocks; ++X) {
+                            size_t RowNumPadded = X*InBlockDim + addrX;
+                            size_t RowNumLimit  = LayerSize[ID];
+                            size_t ColNumPadded = Y*OutBlockDim + addrY;
+                            size_t ColNumLimit  = LayerSize[ID+1];
+                            if ( (RowNumPadded < RowNumLimit) && (ColNumPadded < ColNumLimit) ) {                        
+                                Observation[RowNum*ObservVecWidth+X] = VW[ID][RowNumPadded*OutLayerSize + ColNumPadded];
+                            }
+                            else Observation[RowNum*ObservVecWidth+X] = 0;
+                        }
+                        RowNum++;
+                    }
+                }
+            }
+        }
+
+        // Feed actual observation data into Observation
+        for (size_t iter_=0; iter_<NumSamples; ++iter_) {
+            size_t  InBlockDim = BlockDim[0];
+            size_t NumInBlocks = NumBlocks[0];
+            for (int addrX=0; addrX<InBlockDim; ++addrX) {
+                for (int X=0; X<NumInBlocks; ++X) {
+                    size_t RowNumPadded = X*InBlockDim + addrX;
+                    size_t RowNumLimit  = LayerSize[0];
+                    if (RowNumPadded<RowNumLimit) Observation[RowNum*ObservVecWidth+X] = Observ[iter_*ObservSpaceDim+RowNumPadded];
+                    else Observation[RowNum*ObservVecWidth+X] = 0;
+                }
+                RowNum++;
+            }
+        }
+
+        // Feed Bias and VBias into BiasStd
+        RowNum = 0;
+        for (size_t ID=0; ID<NumLayers-1; ++ID) {
+            size_t nextLayerDim = PaddedLayerSize[ID+1];
+            size_t nextLayerDimLimit = LayerSize[ID+1];
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                if (k<nextLayerDimLimit) BiasStd_CG[RowNum] = B[ID][k];
+                else BiasStd_CG[RowNum] = 0;
+                RowNum++;
+            }
+            for (size_t k=0; k<nextLayerDim; ++k) {
+                if (k<nextLayerDimLimit) BiasStd_CG[RowNum] = VB[ID][k];
+                else BiasStd_CG[RowNum] = 0;
+                RowNum++;
+            }
+        }
+
+        // Feed (1/Std)^2 into BiasStd
+        for (size_t k=0; k<PaddedLayerSize[NumLayers-1]; ++k) {
+            size_t LayerDimLimit = LayerSize[NumLayers-1];
+            if (k<LayerDimLimit) BiasStd_CG[RowNum] = 1.0 / Std[k] / Std[k];
+            else BiasStd_CG[RowNum] = 0;
+            RowNum++;
+        }
+
+        gettimeofday(&tv3, NULL);
+
+        // Init FPGA
+        fprintf(stderr, "[INFO] Loading Model and Simulation Data for CG...\n");
+        TRPO_WriteDRAM_actions_t init_action;
+        init_action.param_start_bytes = 0;
+        init_action.param_size_bytes = PaddedObservVecItems * sizeof(double);
+        init_action.instream_fromCPU = Observation;
+        TRPO_WriteDRAM_run(engine, &init_action);
+
+        gettimeofday(&tv4, NULL);
+        fpgaTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
+
+        // Iterative Solver
+        for (size_t iter_CG=0; iter_CG<=MaxIter; ++iter_CG) {
 
             // Calculate Frobenius Norm of x
             double FrobNorm = 0;
@@ -794,17 +984,17 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             }
             FrobNorm = sqrt(FrobNorm);
 
-            printf("CG Iter[%zu] Residual Norm=%.12e, Soln Norm=%.12e\n", it, rdotr, FrobNorm);
-        
+            printf("CG Iter[%zu] Residual Norm=%.12e, Soln Norm=%.12e\n", iter_CG, rdotr, FrobNorm);
+
             // Check Termination Condition
-            if (rdotr<ResidualTh || it==MaxIter) {
+            if (rdotr<ResidualTh || iter_CG==MaxIter) {
                 for (size_t i=0; i<NumParams; ++i) z[i] = x[i];
                 break;
             }
-        
-            ///////// Fisher Vector Product Computation z = FVP(p) /////////
-        
-            // Init PGW, PGB, PGLogStd from p
+
+            //////////////////// FPGA - Load p ////////////////////
+
+            // Read p into VW, VB and VLogStd
             // Init z to 0
             pos = 0;
             for (size_t i=0; i<NumLayers-1; ++i) {
@@ -812,172 +1002,182 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                 size_t nextLayerDim = LayerSize[i+1];
                 for (size_t j=0; j<curLayerDim;++j) {
                     for (size_t k=0; k<nextLayerDim; ++k) {
-                        PGW[i][j*nextLayerDim+k] = p[pos];
+                        VW[i][j*nextLayerDim+k] = p[pos];
                         z[pos] = 0;
                         pos++;
                     }
                 }
                 for (size_t k=0; k<nextLayerDim; ++k) {
-                    PGB[i][k] = p[pos];
+                    VB[i][k] = p[pos];
                     z[pos] = 0;
                     pos++;
                 }
             }
             for (size_t k=0; k<ActionSpaceDim; ++k) {
-                PGLogStd[k] = p[pos];
+                VLogStd[k] = p[pos];
                 z[pos] = 0;
                 pos++;
             }
-        
-            for (size_t iter=0; iter<NumSamples; iter++) {
-    
-                ///////// Combined Forward Propagation /////////
-    
-                // Initialise the Input Layer
-                for (size_t i=0; i<ObservSpaceDim; ++i) {
-                      Layer[0][i] = Observ[iter*ObservSpaceDim+i];
-                    RxLayer[0][i] = 0;
-                    RyLayer[0][i] = 0;
-                }
-    
-                // Forward Propagation
-                for (size_t i=0; i<NumLayers-1; ++i) {
 
-                    size_t CurrLayerSize = LayerSize[i];
-                    size_t NextLayerSize = LayerSize[i+1];
-                    size_t j, k;
-            
-                    // Propagate from Layer[i] to Layer[i+1]
-                    #pragma omp parallel for private(j,k) shared(Layer, RxLayer, RyLayer, W, PGW, B, PGB, AcFunc) schedule(static)
-                    for (j=0; j<NextLayerSize; ++j) {
-                
-                        // Initialise x_j and R{x_j} in next layer
-                        // Here we just use y_j's memory space to store x_j temoporarily
-                          Layer[i+1][j] = B[i][j];
-                        RxLayer[i+1][j] = PGB[i][j];
-                
-                        for (k=0; k<CurrLayerSize; ++k) {
-                            // From Neuron #k in Layer[i] to Neuron #j in Layer[i+1]
-                              Layer[i+1][j] +=   Layer[i][k] *   W[i][k*NextLayerSize+j];
-                            RxLayer[i+1][j] += RyLayer[i][k] *   W[i][k*NextLayerSize+j];
-                            RxLayer[i+1][j] +=   Layer[i][k] * PGW[i][k*NextLayerSize+j];
-                        }
-
-                        // Calculate y_j and R{y_j} in next layer. Note that R{y_j} depends on y_j
-                        switch (AcFunc[i+1]) {
-                            // Linear Activation Function: Ac(x) = (x)
-                            case 'l': {
-                                RyLayer[i+1][j] = RxLayer[i+1][j];
-                                break;
+            // Feed VW, VB and VLogStd into DataP
+            RowNum = 0;
+            for (size_t ID=0; ID<NumLayers-1; ++ID) {
+            // Parameters of current
+                size_t   InBlockDim = BlockDim[ID];
+                size_t  NumInBlocks = NumBlocks[ID];
+                size_t  OutBlockDim = BlockDim[ID+1];
+                size_t NumOutBlocks = NumBlocks[ID+1];
+                size_t OutLayerSize = LayerSize[ID+1];
+                // Feed Weight of Layer[ID]
+                for (size_t Y=0; Y<NumOutBlocks; ++Y) {
+                    for (size_t addrX=0; addrX<InBlockDim; ++addrX) {
+                        for (size_t addrY=0; addrY<OutBlockDim; ++addrY) {
+                            for (int X=0; X<NumInBlocks; ++X) {
+                                size_t RowNumPadded = X*InBlockDim + addrX;
+                                size_t RowNumLimit  = LayerSize[ID];
+                                size_t ColNumPadded = Y*OutBlockDim + addrY;
+                                size_t ColNumLimit  = LayerSize[ID+1];
+                                if ( (RowNumPadded < RowNumLimit) && (ColNumPadded < ColNumLimit) ) {
+                                    DataP[RowNum*ObservVecWidth+X] = W[ID][RowNumPadded*OutLayerSize + ColNumPadded];
+                                }
+                                else DataP[RowNum*ObservVecWidth+X] = 0;
                             }
-                            // tanh() Activation Function
-                            case 't': {
-                                  Layer[i+1][j] = tanh(Layer[i+1][j]);
-                                RyLayer[i+1][j] = RxLayer[i+1][j] * (1 - Layer[i+1][j] * Layer[i+1][j]);
-                                break;
-                            }
-                            // sigmoid Activation Function
-                            case 's': {
-                                  Layer[i+1][j] = 1.0 / ( 1 + exp(-Layer[i+1][j]) );
-                                RyLayer[i+1][j] = RxLayer[i+1][j] * Layer[i+1][j] * (1 - Layer[i+1][j]);
-                                break;
-                            }
-                            // Default: Activation Function not supported
-                            default: {
-                                printf("[ERROR] AC Function for Layer[%zu] is %c. Unsupported.\n", i+1, AcFunc[i+1]);
-                            }
+                            RowNum++;
                         }
                     }
                 }
-
-
-                ///////// Pearlmutter Backward Propagation /////////
-
-                // Gradient Initialisation
-                // Calculating R{} Gradient of KL w.r.t. output values from the final layer, i.e. R{d(KL)/d(mean_i)}
-                for (size_t i=0; i<ActionSpaceDim; ++i) {
-                    RGLayer[NumLayers-1][i] = RyLayer[NumLayers-1][i] / Std[i] / Std[i];
-                }
-
-                // Backward Propagation
-                for (size_t i=NumLayers-1; i>0; --i) {
-            
-                    size_t CurrLayerSize = LayerSize[i];
-                    size_t PrevLayerSize = LayerSize[i-1];
-                    size_t j, k;
-
-                    // Propagate from Layer[i] to Layer[i-1]
-                    #pragma omp parallel for private(j) shared(Layer, RGLayer, RGB) schedule(static)            
-                    for (j=0; j<CurrLayerSize; ++j) {
-
-                        // Calculating R{} Gradient of KL w.r.t. pre-activated values in Layer[i], i.e. R{d(KL)/d(x_i)}
-                        // Differentiate the activation function
-                        switch (AcFunc[i]) {
-                            // Linear Activation Function: Ac(x) = (x)
-                            case 'l': {break;}
-                            // tanh() Activation Function: tanh' = 1 - tanh^2
-                            case 't': {RGLayer[i][j] = (1-Layer[i][j]*Layer[i][j])*RGLayer[i][j]; break;}
-                            // sigmoid Activation Function: sigmoid' = sigmoid * (1 - sigmoid)
-                            case 's': {RGLayer[i][j] = RGLayer[i][j]*Layer[i][j]*(1-Layer[i][j]); break;}
-                            // Default: Activation Function not supported
-                            default: {
-                                fprintf(stderr, "[ERROR] AC Function for Layer [%zu] is %c. Unsupported.\n", i, AcFunc[i]);
+                // Feed VWeight of Layer[ID]
+                for (size_t Y=0; Y<NumOutBlocks; ++Y) {
+                    for (size_t addrX=0; addrX<InBlockDim; ++addrX) {
+                        for (size_t addrY=0; addrY<OutBlockDim; ++addrY) {
+                            for (size_t X=0; X<NumInBlocks; ++X) {
+                                size_t RowNumPadded = X*InBlockDim + addrX;
+                                size_t RowNumLimit  = LayerSize[ID];
+                                size_t ColNumPadded = Y*OutBlockDim + addrY;
+                                size_t ColNumLimit  = LayerSize[ID+1];
+                                if ( (RowNumPadded < RowNumLimit) && (ColNumPadded < ColNumLimit) ) {                        
+                                    DataP[RowNum*ObservVecWidth+X] = VW[ID][RowNumPadded*OutLayerSize + ColNumPadded];
+                                }
+                                else DataP[RowNum*ObservVecWidth+X] = 0;
                             }
+                            RowNum++;
                         }
-
-                        // The R{} derivative w.r.t to Bias is the same as that w.r.t. the pre-activated value
-                        RGB[i-1][j] = RGLayer[i][j];
-                    }
-
-                    // Calculate the R{} derivative w.r.t. to Weight and the output values from Layer[i]
-                    #pragma omp parallel for private(j,k) shared(Layer, RGLayer, W, RGW) schedule(static)
-                    for (j=0; j<PrevLayerSize; ++j) {
-                        double temp = 0;
-                        for (k=0; k<CurrLayerSize; ++k) {
-                            // The R{} Derivative w.r.t. to the weight from Neuron #j in Layer[i-1] to Neuron #k in Layer[i]
-                            RGW[i-1][j*CurrLayerSize+k] = Layer[i-1][j] * RGLayer[i][k];
-                            // Accumulate the Gradient from Neuron #k in Layer[i] to Neuron #j in Layer[i-1]
-                            temp += W[i-1][j*CurrLayerSize+k] * RGLayer[i][k];
-                        }
-                        RGLayer[i-1][j] = temp;
                     }
                 }
-        
-                // Accumulate the Fisher-Vector Product to z
-                pos = 0;
-                for (size_t i=0; i<NumLayers-1; ++i) {
-                    size_t curLayerDim = LayerSize[i];
-                    size_t nextLayerDim = LayerSize[i+1];
-                    for (size_t j=0; j<curLayerDim;++j) {
-                        for (size_t k=0; k<nextLayerDim; ++k) {
-                            z[pos] += RGW[i][j*nextLayerDim+k];
+            }
+
+            // Pad actual observation data into DataP
+            bool isPadding = true;
+            for (size_t iter_=0; iter_<NumSamples && isPadding; ++iter_) {
+                size_t  InBlockDim = BlockDim[0];
+                size_t NumInBlocks = NumBlocks[0];
+                for (int addrX=0; addrX<InBlockDim && isPadding; ++addrX) {
+                    for (int X=0; X<NumInBlocks; ++X) {
+                        size_t RowNumPadded = X*InBlockDim + addrX;
+                        size_t RowNumLimit  = LayerSize[0];
+                        size_t posDataP     = RowNum*ObservVecWidth+X;
+                        if (posDataP<PaddedDataPVecItems) {
+                            if (RowNumPadded<RowNumLimit) DataP[posDataP] = Observ[iter_*ObservSpaceDim+RowNumPadded];
+                            else DataP[posDataP] = 0;
+                        }
+                        else {
+                            isPadding = false;
+                            break;
+                        }
+                    }
+                    RowNum++;
+                }
+            }
+
+            // Feed Bias and VBias into BiasStd_CG
+            RowNum = 0;
+            for (size_t ID=0; ID<NumLayers-1; ++ID) {
+                size_t nextLayerDim = PaddedLayerSize[ID+1];
+                size_t nextLayerDimLimit = LayerSize[ID+1];
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    if (k<nextLayerDimLimit) BiasStd_CG[RowNum] = B[ID][k];
+                    else BiasStd_CG[RowNum] = 0;
+                    RowNum++;
+                }
+                for (size_t k=0; k<nextLayerDim; ++k) {
+                    if (k<nextLayerDimLimit) BiasStd_CG[RowNum] = VB[ID][k];
+                    else BiasStd_CG[RowNum] = 0;
+                    RowNum++;
+                }
+            }
+
+            gettimeofday(&tv3, NULL);
+
+            // Feed DataP to BRAM
+            TRPO_WriteDRAM_actions_t write_action;
+            write_action.param_start_bytes = 0;
+            write_action.param_size_bytes = PaddedDataPVecItems * sizeof(double);
+            write_action.instream_fromCPU = DataP;
+            TRPO_WriteDRAM_run(engine, &write_action);
+
+            gettimeofday(&tv4, NULL);
+            fpgaTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
+
+
+            //////////////////// FPGA - Calc z = FIM*p ////////////////////
+
+            // Init Advanced Static Interface
+            TRPO_Run_actions_t run_action;
+            run_action.param_NumSamples           = NumSamples;
+            run_action.param_PaddedObservVecItems = PaddedObservVecItems;
+            run_action.instream_BiasStd           = BiasStd_CG;
+            run_action.outstream_FVP              = FVPResult;
+
+            // Run DFE and Measure Elapsed Time
+            gettimeofday(&tv3, NULL);
+
+            TRPO_Run_run(engine, &run_action);
+
+            gettimeofday(&tv4, NULL);
+            fpgaTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
+
+            // Read FVP into z
+            pos = 0;
+            size_t FVPPos = 0;
+            for (size_t i=0; i<NumLayers-1; ++i) {
+                size_t  curLayerSizePadded = PaddedLayerSize[i];
+                size_t nextLayerSizePadded = PaddedLayerSize[i+1];
+                size_t  curLayerSizeReal   = LayerSize[i];
+                size_t nextLayerSizeReal   = LayerSize[i+1];
+                for (size_t j=0; j<curLayerSizePadded; ++j) {
+                    for (size_t k=0; k<nextLayerSizePadded; ++k) {
+                        if ( (j<curLayerSizeReal) && (k<nextLayerSizeReal) ) {
+                            z[pos] = FVPResult[FVPPos];
                             pos++;
                         }
+                        FVPPos++;
                     }
-                    for (size_t k=0; k<nextLayerDim; ++k) {
-                        z[pos] += RGB[i][k];
+                }
+                for (size_t k=0; k<nextLayerSizePadded; ++k) {
+                    if (k<nextLayerSizeReal) {
+                        z[pos] = FVPResult[FVPPos];
                         pos++;
                     }
+                    FVPPos++;
                 }
-                for (size_t k=0; k<ActionSpaceDim; ++k) {
-                    z[pos] += 2 * PGLogStd[k];
-                    pos++;
-                }
-            
-            } // End of iteration over current sample
+            }
+            for (size_t k=0; k<ActionSpaceDim; ++k) {
+                z[pos] = 2 * NumSamples * VLogStd[k];
+                pos++;
+            }
 
 
             // Averaging Fisher Vector Product over the samples and apply CG Damping
             #pragma omp parallel for
             for (size_t i=0; i<pos; ++i) {
-                z[i] = z[i] / (double)NumSamples + CG_Damping * p[i];
+                z[i] = z[i] / (double)NumSamples;
+                z[i] += CG_Damping * p[i];
             }
-    
-            //////////////// FVP Finish        
-    
+
+            //////////////////// FPGA - End ////////////////////
+
             // Update x and r
             double pdotz = 0;
-
             #pragma omp parallel for reduction (+:pdotz)
             for (size_t i=0; i<NumParams; ++i) {
                 pdotz += p[i] * z[i];
@@ -988,7 +1188,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
                 x[i] += v * p[i];
                 r[i] -= v * z[i];
             }
-        
+
             // Update p
             double newrdotr = 0;
             #pragma omp parallel for reduction (+:newrdotr)
@@ -1000,9 +1200,9 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             for (size_t i=0; i<NumParams; ++i) {
                 p[i] = r[i] + mu * p[i];
             }
-        
+
             // Update rdotr
-            rdotr = newrdotr;
+            rdotr = newrdotr; 
 
         }
 
@@ -1396,6 +1596,11 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             pos++;
         }
 
+        // Toc
+        gettimeofday(&tv2, NULL);
+        runtimeS += ((tv2.tv_sec-tv1.tv_sec) * (double)1E6 + (tv2.tv_usec-tv1.tv_usec)) / (double)1E6;
+
+
         //////////////////// Save Training Result ////////////////////
 
         // Save training result EVERY 100 Iteration as well as in the Last Iteration
@@ -1441,9 +1646,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
         
     } // Training Finished
 
-    // Toc
-    gettimeofday(&tv2, NULL);
-    double runtimeS = ((tv2.tv_sec-tv1.tv_sec) * (double)1E6 + (tv2.tv_usec-tv1.tv_usec)) / (double)1E6;
+    fprintf(stderr, "[INFO] Total Time for training is %f seconds, among which FPGA Time is %f seconds.\n", runtimeS, fpgaTime);
 
 
     //////////////////// Clean Up ////////////////////
@@ -1455,12 +1658,13 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     for (size_t i=0; i<NumLayers-1; ++i) {
         free(W[i]); free(B[i]); 
         free(GW[i]); free(GB[i]);
+        free(VW[i]); free(VB[i]);
         free(PGW[i]); free(PGB[i]);
         free(RGW[i]); free(RGB[i]); 
     }
     
     // Model: LogStd, Gradient of LogStd, Policy Gradient of LogStd, R{} Gradient of LogStd
-    free(LogStd); free(GLogStd); free(PGLogStd); free(RGLogStd);
+    free(LogStd); free(GLogStd); free(PGLogStd); free(RGLogStd); free(VLogStd);
     
     // Baseline: Weight & Bias, Gradient of Weight & Bias
     for (size_t i=0; i<NumLayers-1; ++i) {
@@ -1491,9 +1695,11 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     free(Observ); free(Mean); free(Std); free(Action); free(Reward); free(Return); free(Baseline); free(Advantage);
     
     // FPGA
-    
+    max_unload(engine); TRPO_free();
     free(BlockDim); free(WeightInit); free(BiasStd);
-    
+
+    // Free Memories Allocated for DFE
+    free(Observation); free(BiasStd_CG); free(FVPResult); free(DataP);
     
     return runtimeS;
 }

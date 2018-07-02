@@ -483,7 +483,7 @@ int main() {
 
 //    Test_FVP_FPGA();
 //    Test_CG_FPGA(6);
-    Test_TRPO_Lightweight_FPGA(1, 6);
+    Test_TRPO_Lightweight_FPGA(2, 6);
 
     //////////////////// Simulation Based Training ////////////////////
 
