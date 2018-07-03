@@ -52,24 +52,12 @@ class LightweightKernel extends Kernel {
     int          StdInitCycles = LayerSize[3];
     int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles + StdInitCycles;
 
-    // Number of Cycles for Each Sample (Forward Propagation + ForwardKinematicsCalcLatency)
-    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
-    int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
-    int SimulationCyclesPerSample = FwdPropCyclesPerSample + Def.ForwardKinematicsCalcLatency;
-
-    // Number of Cycles for Each Episode
-    int SimulationCyclesPerEpisode = SimulationCyclesPerSample * Def.EpisodeLen;
-    
-    // Total Number of Cycles Each LightweightSimulator Needs to Run
-    int TotalSimulationCycles = SimulationCyclesPerEpisode * Def.NumEpisodesPerSimulator;
-
 
     /////////////////////// Control ///////////////////////
 
     // Overall Control
     DFEVar Tick = control.count.simpleCounter(32);
-    DFEVar beginInit       = (Tick === 1);
-    DFEVar beginSimulation = (Tick === WeightInitCycles);
+    DFEVar beginInit = (Tick === 1);
 
     // Weight Initialisation Control
     DFEVar beginWeightInit = beginInit;
@@ -83,6 +71,9 @@ class LightweightKernel extends Kernel {
 
 
     /////////////////////// Input ///////////////////////
+
+    // Scalar Input - Iter Number
+    DFEVar IterNumber = io.scalarInput("IterNumber", dfeUInt(32));
     
     // Weight Input to Kernel - cast to fix point
     DFEVector<DFEVar> InVec = io.input("WeightInit", InVecType, isWeightInitiating);
@@ -104,7 +95,7 @@ class LightweightKernel extends Kernel {
     // Lightweight Simulators
     LightweightSimulator [] LW = new LightweightSimulator[Def.NumLightweightSimulators];
     for (int i=0; i<Def.NumLightweightSimulators; ++i) {
-        DFEVar beginSimulation_i = (Tick === WeightInitCycles + 16*i);
+        DFEVar beginSimulation_i = (Tick === WeightInitCycles + IterNumber + 16*i);
         LW[i] = new LightweightSimulator(this, i, WeightInitData, BiasStdInitData, beginInit, beginSimulation_i);
         DFEVector<DFEVar> Observ = LW[i].getObserv();
         DFEVector<DFEVar>   Mean = LW[i].getMean();
@@ -171,7 +162,7 @@ class LightweightKernel extends Kernel {
 
     /////////////////////// Debug ///////////////////////
 
-    debug.simPrintf(EnActionRewardOutput, "[%4d] **** Mean = (%f, %f, %f), Std = (%f, %f, %f) **** \n", Tick, OutMeanVec[0], OutMeanVec[1], OutMeanVec[2], OutStdVec[0], OutStdVec[1], OutStdVec[2]);
+//    debug.simPrintf(EnActionRewardOutput, "[%4d] **** Mean = (%f, %f, %f), Std = (%f, %f, %f) **** \n", Tick, OutMeanVec[0], OutMeanVec[1], OutMeanVec[2], OutStdVec[0], OutStdVec[1], OutStdVec[2]);
 
     }
 

@@ -95,6 +95,10 @@ public class TRPOManager extends CustomManager{
 
         ///////////////////////// Inputs /////////////////////////
 
+        // Scalar Input - Iter
+        InterfaceParam IterNumber = ei.addParam("IterNumber", CPUTypes.UINT32);
+        ei.setScalar(LightweightKernel_Name, "IterNumber", IterNumber);
+
         // WeightInit Vector
         int WeightInitVecLength = 0;
         for (int i=0; i<NumLayers-1; ++i) {

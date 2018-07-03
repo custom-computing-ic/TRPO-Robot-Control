@@ -23,10 +23,10 @@ class Def {
     public static final int ActionSpaceDim = 3;
 
     // Lightweight Simulator
-    public static final int NumEpisodes = 4;
-    public static final int EpisodeLen  = 10;
+    public static final int NumEpisodes = 20;
+    public static final int EpisodeLen  = 150;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
-    public static final int NumLightweightSimulators = 2;
+    public static final int NumLightweightSimulators = 5;
     public static final int NumEpisodesPerSimulator = NumEpisodes / NumLightweightSimulators;
     public static final double TimeStepLen = 0.02;
 
