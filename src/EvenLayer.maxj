@@ -605,9 +605,9 @@ class EvenLayer extends KernelLib{
     // For Number Representation Optimisation
     // Check Minimum and Maximum values of Y and Ry
     DFEVar beginReport = beginBwdProp;
-    debug.simPrintf(beginReport, "Layer[%d] NewPreAc_y  Range = [%f, %f]\n", ID, Reductions.streamMin(NewPreAc_y), Reductions.streamMax(NewPreAc_y));
-    debug.simPrintf(beginReport, "Layer[%d] NewPreAc_Ry Range = [%f, %f]\n", ID, Reductions.streamMin(NewPreAc_Ry), Reductions.streamMax(NewPreAc_Ry));
-    debug.simPrintf(beginReport, "Layer[%d] RyVec       Range = [%f, %f]\n", ID, Reductions.streamMin(RyVec), Reductions.streamMax(RyVec));
+    debug.simPrintf(beginReport, "[CPP] Layer[%d] NewPreAc_y  Range = [%f, %f]\n", ID, Reductions.streamMin(NewPreAc_y), Reductions.streamMax(NewPreAc_y));
+    debug.simPrintf(beginReport, "[CPP] Layer[%d] NewPreAc_Ry Range = [%f, %f]\n", ID, Reductions.streamMin(NewPreAc_Ry), Reductions.streamMax(NewPreAc_Ry));
+    debug.simPrintf(beginReport, "[CPP] Layer[%d] RyVec       Range = [%f, %f]\n", ID, Reductions.streamMin(RyVec), Reductions.streamMax(RyVec));
 */
 
 

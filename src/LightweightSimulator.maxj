@@ -64,18 +64,21 @@ class LightweightSimulator extends KernelLib {
     int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
     int SimulationCyclesPerSample = FwdPropCyclesPerSample + Def.ForwardKinematicsCalcLatency;
 
-    // Total FPGA Cycles for simulating one episode
-    int NumSimulationCycles = Def.EpisodeLen * SimulationCyclesPerSample;
+    // Number of Cycles for Each Episode
+    int SimulationCyclesPerEpisode = SimulationCyclesPerSample * Def.EpisodeLen;
+
+    // Total Number of Cycles Each LightweightSimulator Needs to Run
+    int TotalSimulationCycles = SimulationCyclesPerEpisode * Def.NumEpisodesPerSimulator;
 
 
     /////////////////////// Control - Overall Progress ///////////////////////
 
     // Total Cycles of Lightweight Simulation
-    AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, NumSimulationCycles, beginSimulation);
+    AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, TotalSimulationCycles, beginSimulation);
     DFEVar isSimulating = LightweightSimulationCounter.isValid();
 
-    // Inner Loop - Counting the Simulation of a sample
-    // Note: When this counter wraps, it means the system is ready to simulate another sample
+    // Inner Loop - Counting the Simulation of a sample (timestep)
+    // Note: When this counter wraps, it means the system is ready to simulate another timestep
     Count.Params InnerLoopCounterParam = control.count.makeParams(16)
                                                   .withInitValue(0)
                                                   .withMax(SimulationCyclesPerSample)
@@ -84,16 +87,18 @@ class LightweightSimulator extends KernelLib {
     Counter InnerLoopCounter = control.count.makeCounter(InnerLoopCounterParam);
     DFEVar InnerLoopCount = InnerLoopCounter.getCount();
 
-    // Outer Loop - Counting the number of Simulation Rounds
+    // Outer Loop - Counting the number of Simulation Timesteps
     Count.Params OuterLoopCounterParam = control.count.makeParams(16)
                                                   .withInitValue(0)
+                                                  .withMax(Def.EpisodeLen)
                                                   .withEnable(InnerLoopCounter.getWrap())
-                                                  .withWrapMode(WrapMode.STOP_AT_MAX)
+                                                  .withWrapMode(WrapMode.COUNT_LT_MAX_THEN_WRAP)
                                                   .withReset(beginSimulation);
     Counter OuterLoopCounter = control.count.makeCounter(OuterLoopCounterParam);
     DFEVar OuterLoopCount = OuterLoopCounter.getCount();
 
     // Forward Propagation Control
+    DFEVar beginEpisode = isSimulating & (InnerLoopCount === 0) & (OuterLoopCount === 0);
     DFEVar beginFwdProp = isSimulating & (InnerLoopCount === 0);
 
 
@@ -122,7 +127,7 @@ class LightweightSimulator extends KernelLib {
     /////////////////////// Observation ///////////////////////
     
     // Control
-    DFEVar EnObservInit = beginSimulation;
+    DFEVar EnObservInit = beginEpisode;
     DFEVar EnObservUpdate = dfeUInt(1).newInstance(this);
 
     // Internal State
@@ -309,7 +314,7 @@ class LightweightSimulator extends KernelLib {
     DFEVar Action_1 = KernelMath.abs(Action[1]).cast(Def.RewardType);
     DFEVar Action_2 = KernelMath.abs(Action[2]).cast(Def.RewardType);
     DFEVar Reward_Action   = Action_0 * Action_0 + Action_1 * Action_1 + Action_2 * Action_2;
-    Reward = - Reward_Distance.cast(Def.DataType) - Reward_Action.cast(Def.DataType);
+    Reward = - Reward_Distance - Reward_Action;
 
     // Is Observ Valid
     ObservValid = beginFwdProp;
@@ -322,12 +327,13 @@ class LightweightSimulator extends KernelLib {
 
     // Debug
     DFEVar Tick = control.count.simpleCounter(32);
-//    debug.simPrintf("[%4d] Uniform Rand = (%f, %f, %f), Gaussian Rand = %f\n", Tick, URand0, URand1, URand2, GaussianRandomNumber);
+    debug.simPrintf(beginEpisode, "[%4d] [%2d] ----- Begin Episode ----- \n", Tick, ID);
     debug.simPrintf(beginFwdProp, "[%4d] [%2d] Begin Simulation Sample[%d]\n", Tick, ID, OuterLoopCount);
+//    debug.simPrintf("[%4d] Uniform Rand = (%f, %f, %f), Gaussian Rand = %f\n", Tick, URand0, URand1, URand2, GaussianRandomNumber);
 //    debug.simPrintf(beginFwdProp, "[%4d] theta = (%f, %f, %f)\n", Tick, theta_1, theta_2, theta_3);
 //    for(int i=0; i<15; ++i) debug.simPrintf(beginFwdProp, "[%4d] Input Observ[%d] = %f\n", Tick, i, Observ[i]);
-    debug.simPrintf(isFwdValid, "[%4d] [%2d] Grip = (%f, %f, %f), Object = (%f, %f, %f)\n", Tick, ID, Grip_x_new, Grip_y_new, Grip_z_new, Observ_30, Observ_31, Observ_32);
-    debug.simPrintf(isFwdValid, "[%4d] [%2d] Mean = (%f, %f, %f), Std = (%f, %f, %f) => Action = (%f, %f, %f) => |Reward_Dist| = %f, |Reward_Ac| = %f, Reward = %f\n", Tick, ID, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2], Action[0], Action[1], Action[2], Reward_Distance, Reward_Action, Reward);
+//    debug.simPrintf(isFwdValid, "[%4d] [%2d] Grip = (%f, %f, %f), Object = (%f, %f, %f)\n", Tick, ID, Grip_x_new, Grip_y_new, Grip_z_new, Observ_30, Observ_31, Observ_32);
+//    debug.simPrintf(isFwdValid, "[%4d] [%2d] Mean = (%f, %f, %f), Std = (%f, %f, %f) => Action = (%f, %f, %f) => |Reward_Dist| = %f, |Reward_Ac| = %f, Reward = %f\n", Tick, ID, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2], Action[0], Action[1], Action[2], Reward_Distance, Reward_Action, Reward);
 //    debug.simPrintf(isFwdValid, "[%4d] Output Observ[3:11] = (%f, %f, %f, %f, %f, %f, %f, %f, %f)\n", Tick, Observ[3], Observ[4], Observ[5], Observ[6], Observ[7], Observ[8], Observ[9], Observ[10], Observ[11]);
 //    debug.simPrintf(EnObservUpdate, "[%4d] Observation State Updated\n", Tick);
 

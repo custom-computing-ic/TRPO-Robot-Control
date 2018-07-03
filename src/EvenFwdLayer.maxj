@@ -343,8 +343,8 @@ class EvenFwdLayer extends KernelLib{
 /*
     // For Number Representation Optimisation
     // Check Minimum and Maximum values of Y
-    DFEVar beginReport = beginBwdProp;
-    debug.simPrintf(beginReport, "Layer[%d] NewPreAc_y  Range = [%f, %f]\n", ID, Reductions.streamMin(NewPreAc_y), Reductions.streamMax(NewPreAc_y));
+    DFEVar beginReport = beginFwdProp;
+    debug.simPrintf(beginReport, "[LW Simulator] Layer[%d] NewPreAc_y  Range = [%f, %f]\n", ID, Reductions.streamMin(NewPreAc_y), Reductions.streamMax(NewPreAc_y));
 */
 
 

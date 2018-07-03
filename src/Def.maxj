@@ -26,7 +26,8 @@ class Def {
     public static final int NumEpisodes = 4;
     public static final int EpisodeLen  = 10;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
-    public static final int NumLightweightSimulators = 4;
+    public static final int NumLightweightSimulators = 2;
+    public static final int NumEpisodesPerSimulator = NumEpisodes / NumLightweightSimulators;
     public static final double TimeStepLen = 0.02;
 
     // pi - for Gaussian Random Number generation
@@ -95,12 +96,12 @@ class Def {
     // For Accumulator
     public static final DFEType AccType = KernelLib.dfeFix(20, FracBits, SignMode.TWOSCOMPLEMENT);
     
-    // For tanh() Activation Function - current AcExpType supports inputs within [-9, 9]
-    public static final DFEType AcInType  = KernelLib.dfeFix(6, FracBits, SignMode.TWOSCOMPLEMENT);
-    public static final DFEType AcExpType = KernelLib.dfeFix(26, FracBits, SignMode.UNSIGNED);
+    // For tanh() Activation Function - current AcExpType supports inputs within [-3, 3]
+    public static final DFEType AcInType  = KernelLib.dfeFix(5, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType AcExpType = KernelLib.dfeFix(12, FracBits, SignMode.UNSIGNED);
 
     // For Reward Calculation - need a few more fractional bits to avoid cancellation
-    public static final DFEType RewardType = KernelLib.dfeFix(4, FracBits, SignMode.UNSIGNED);
+    public static final DFEType RewardType = KernelLib.dfeFix(6, FracBits, SignMode.TWOSCOMPLEMENT);
 
 
     ///////////////////////// Software Utility Functions /////////////////////////

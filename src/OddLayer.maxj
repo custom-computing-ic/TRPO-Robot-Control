@@ -592,9 +592,9 @@ class OddLayer extends KernelLib{
     // For Number Representation Optimisation
     // Check Minimum and Maximum values of Y and Ry
     DFEVar beginReport = beginBwdProp;
-    debug.simPrintf(beginReport, "Layer[%d] PrevAcY  Range = [%f, %f]\n", ID, Reductions.streamMin(PrevAcY), Reductions.streamMax(PrevAcY));
-    debug.simPrintf(beginReport, "Layer[%d] PrevAcRy Range = [%f, %f]\n", ID, Reductions.streamMin(PrevAcRy), Reductions.streamMax(PrevAcRy));
-    debug.simPrintf(beginReport, "Layer[%d] RyVec    Range = [%f, %f]\n", ID, Reductions.streamMin(RyVec), Reductions.streamMax(RyVec));
+    debug.simPrintf(beginReport, "[CPP] Layer[%d] PrevAcY  Range = [%f, %f]\n", ID, Reductions.streamMin(PrevAcY), Reductions.streamMax(PrevAcY));
+    debug.simPrintf(beginReport, "[CPP] Layer[%d] PrevAcRy Range = [%f, %f]\n", ID, Reductions.streamMin(PrevAcRy), Reductions.streamMax(PrevAcRy));
+    debug.simPrintf(beginReport, "[CPP] Layer[%d] RyVec    Range = [%f, %f]\n", ID, Reductions.streamMin(RyVec), Reductions.streamMax(RyVec));
 */
 
 /*
@@ -698,7 +698,7 @@ class OddLayer extends KernelLib{
 /*
     // For Number Representation Optimisation
     // Check Minimum and Maximum values of RG
-    debug.simPrintf(beginReport, "Layer[%d] RGLayer Range = [%f, %f]\n", ID, Reductions.streamMin(RGLayer), Reductions.streamMax(RGLayer));
+    debug.simPrintf(beginReport, "Layer[%d] RGLayer Range = [%f, %f]\n", ID, Reductions.streamMin(RGLayer_original), Reductions.streamMax(RGLayer_original));
     debug.simPrintf(beginReport, "Layer[%d] New_RG  Range = [%f, %f]\n", ID, Reductions.streamMin(New_RG), Reductions.streamMax(New_RG));
     debug.simPrintf(beginReport, "Layer[%d] RGVec   Range = [%f, %f]\n", ID, Reductions.streamMin(RGVec), Reductions.streamMax(RGVec));
 */

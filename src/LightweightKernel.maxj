@@ -28,7 +28,7 @@ class LightweightKernel extends Kernel {
     DFEVectorType<DFEVar> ActionVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.NumLightweightSimulators);
     DFEVectorType<DFEVector<DFEVar>> ObservGridVecType = new DFEVectorType<DFEVector<DFEVar>>(ObservVecType, Def.ObservSpaceDim);
     DFEVectorType<DFEVector<DFEVar>> ActionGridVecType = new DFEVectorType<DFEVector<DFEVar>>(ActionVecType, Def.ActionSpaceDim);
-    DFEVectorType<DFEVar> RewardVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.NumLightweightSimulators);
+    DFEVectorType<DFEVar> RewardVecType = new DFEVectorType<DFEVar>(Def.RewardType, Def.NumLightweightSimulators);
 
     DFEVectorType<DFEVar> FixObVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ObservSpaceDim);
     DFEVectorType<DFEVar> FixAcVecType = new DFEVectorType<DFEVar>(Def.DataType, Def.ActionSpaceDim);
@@ -52,15 +52,17 @@ class LightweightKernel extends Kernel {
     int          StdInitCycles = LayerSize[3];
     int BiasStdInitCycles = FstLayerBiasInitCycles + SndLayerBiasInitCycles + TrdLayerBiasInitCycles + StdInitCycles;
 
-    // Number of Cycles for Each Round of Simulation (Forward Propagation + ForwardKinematicsCalcLatency)
+    // Number of Cycles for Each Sample (Forward Propagation + ForwardKinematicsCalcLatency)
     int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
     int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
     int SimulationCyclesPerSample = FwdPropCyclesPerSample + Def.ForwardKinematicsCalcLatency;
 
-    // Total Simulation Time
-    int NumSimulationRounds = Def.NumSamples / Def.NumLightweightSimulators;
-    int NumSimulationCycles = NumSimulationRounds * SimulationCyclesPerSample;
+    // Number of Cycles for Each Episode
+    int SimulationCyclesPerEpisode = SimulationCyclesPerSample * Def.EpisodeLen;
     
+    // Total Number of Cycles Each LightweightSimulator Needs to Run
+    int TotalSimulationCycles = SimulationCyclesPerEpisode * Def.NumEpisodesPerSimulator;
+
 
     /////////////////////// Control ///////////////////////
 

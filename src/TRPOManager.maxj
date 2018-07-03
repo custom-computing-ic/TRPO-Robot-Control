@@ -32,7 +32,7 @@ public class TRPOManager extends CustomManager{
             // Build Configuration
             BuildConfig BuildCfg = new BuildConfig(BuildConfig.Level.FULL_BUILD);
             BuildCfg.setBuildEffort(BuildConfig.Effort.VERY_HIGH);
-            BuildCfg.setOptimizationGoal(BuildConfig.OptimizationTechnique.AREA);
+            BuildCfg.setOptimizationGoal(BuildConfig.OptimizationTechnique.SPEED);
             BuildCfg.setMPPRCostTableSearchRange(1, 16);
             BuildCfg.setMPPRParallelism(8);
             BuildCfg.setEnableTimingAnalysis(true);
@@ -127,7 +127,7 @@ public class TRPOManager extends CustomManager{
         int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
         int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3] + Def.ForwardKinematicsCalcLatency;
         int FwdPropCycles = FwdPropCyclesPerSample * Def.NumSamples / Def.NumLightweightSimulators;
-        int NumTicks = WeightInitVecLength + FwdPropCycles + 4;
+        int NumTicks = WeightInitVecLength + FwdPropCycles + 1000;
         ei.setTicks(LightweightKernel_Name, NumTicks);
 
         ei.ignoreAll(Direction.IN_OUT);

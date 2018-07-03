@@ -312,8 +312,8 @@ class OddFwdLayer extends KernelLib{
 /*
     // For Number Representation Optimisation
     // Check Minimum and Maximum values of Y and Ry
-    DFEVar beginReport = beginBwdProp;
-    debug.simPrintf(beginReport, "Layer[%d] PrevAcY  Range = [%f, %f]\n", ID, Reductions.streamMin(PrevAcY), Reductions.streamMax(PrevAcY));
+    DFEVar beginReport = beginFwdProp;
+    debug.simPrintf(beginReport, "[LW Simulator] Layer[%d] PrevAcY  Range = [%f, %f]\n", ID, Reductions.streamMin(PrevAcY), Reductions.streamMax(PrevAcY));
 */
 
 /*

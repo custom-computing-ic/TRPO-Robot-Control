@@ -53,10 +53,10 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     // iterator when traversing through input vector and result vector
     size_t pos;
 
-    // Number of Episodes per Batch
+    // Number of Episodes per Batch (NumEpisodes in Def.maxj)
     const int NumEpBatch = 4;   // 20
     
-    // Length of Each Episode - timestep_limit
+    // Length of Each Episode - timestep_limit (EpisodeLen in Def.maxj)
     const int EpLen = 10;  // 150
 
     // Number of Samples
