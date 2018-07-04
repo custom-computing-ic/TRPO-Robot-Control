@@ -54,10 +54,13 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     size_t pos;
 
     // Number of Episodes per Batch (NumEpisodes in Def.maxj)
-    const int NumEpBatch = 20;   // 20
+    const int NumEpBatch = 20;
     
     // Length of Each Episode - timestep_limit (EpisodeLen in Def.maxj)
-    const int EpLen = 150;  // 150
+    const int EpLen = 150;
+
+    // Number of Lightweight Simulators
+    const int NumLightweightSimulators = 5;
 
     // Number of Samples
     size_t NumSamples = NumEpBatch * EpLen;
@@ -126,6 +129,10 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     double * Baseline  = (double *) calloc(NumSamples, sizeof(double));
     double * Advantage = (double *) calloc(NumSamples, sizeof(double));
 
+    double * Observ_FPGA = (double *) calloc(NumSamples*ObservSpaceDim, sizeof(double));
+    double * Mean_FPGA   = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Action_FPGA = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
+    double * Reward_FPGA = (double *) calloc(NumSamples, sizeof(double));
 
     //////////////////// Memory Allocation - Ordinary Forward and Backward Propagation ////////////////////
 
@@ -532,15 +539,39 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
         simulation_action.param_IterNumber     = iter;
         simulation_action.instream_WeightInit  = WeightInit;   // 4608 bytes
         simulation_action.instream_BiasStdInit = BiasStd;      // 320 bytes
-        simulation_action.outstream_Observ     = Observ;
-        simulation_action.outstream_Mean       = Mean;
-        simulation_action.outstream_Action     = Action;
-        simulation_action.outstream_Reward     = Reward;
+        simulation_action.outstream_Observ     = Observ_FPGA;
+        simulation_action.outstream_Mean       = Mean_FPGA;
+        simulation_action.outstream_Action     = Action_FPGA;
+        simulation_action.outstream_Reward     = Reward_FPGA;
         TRPO_RunLightweight_run(engine, &simulation_action);
 
         gettimeofday(&tv4, NULL);
         fpgaTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
 
+        // Re-Ordering FPGA Output Data
+        size_t WrRowAddr = 0;
+        for (size_t i=0; i<NumLightweightSimulators; ++i) {
+            size_t NumSamplesPerSimulator = NumSamples/NumLightweightSimulators;
+            for (size_t j=0; j<NumSamplesPerSimulator; ++j) {
+                size_t RdRowAddr = j * NumLightweightSimulators + i;
+                // Observ
+                for (size_t k=0; k<ObservSpaceDim; ++k) {
+                    Observ[WrRowAddr*ObservSpaceDim+k] = Observ_FPGA[RdRowAddr*ObservSpaceDim+k];
+                }
+                // Mean
+                for (size_t k=0; k<ActionSpaceDim; ++k) {
+                    Mean[WrRowAddr*ActionSpaceDim+k] = Mean_FPGA[RdRowAddr*ActionSpaceDim+k];
+                }
+                // Action
+                for (size_t k=0; k<ActionSpaceDim; ++k) {
+                    Action[WrRowAddr*ActionSpaceDim+k] = Action_FPGA[RdRowAddr*ActionSpaceDim+k];
+                }
+                // Reward
+                Reward[WrRowAddr] = Reward_FPGA[RdRowAddr];
+
+                ++WrRowAddr;
+            }
+        }
 
         // Feed LogStd into Std
         for (int i=0; i<ActionSpaceDim; ++i) Std[i] = exp(LogStd[i]);
@@ -1698,6 +1729,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     // FPGA
     max_unload(engine); TRPO_free();
     free(BlockDim); free(WeightInit); free(BiasStd);
+    free(Observ_FPGA); free(Mean_FPGA); free(Action_FPGA); free(Reward_FPGA);
 
     // Free Memories Allocated for DFE
     free(Observation); free(BiasStd_CG); free(FVPResult); free(DataP);

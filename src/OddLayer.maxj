@@ -808,7 +808,7 @@ class OddLayer extends KernelLib{
         DFEVar DivResult = 2 / Exp2xPlus1;
         optimization.popPipeliningFactor();
         // Sub
-        DFEVar Result = (x>2.77) ? 0.995 : 1 - DivResult.cast(Def.yType);
+        DFEVar Result = (x<-5.2) ? -1 : ((x>2.77) ? 0.995 : 1 - DivResult.cast(Def.yType));
         return Result;
     }
 

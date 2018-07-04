@@ -324,11 +324,11 @@ class LightweightSimulator extends KernelLib {
 
 
     /////////////////////// Debug ///////////////////////
-
+/*
     // Debug
     DFEVar Tick = control.count.simpleCounter(32);
     debug.simPrintf(beginEpisode, "[%4d] [%2d] ----- Begin Episode ----- \n", Tick, ID);
-    debug.simPrintf(beginFwdProp, "[%4d] [%2d] Begin Simulation Sample[%d]\n", Tick, ID, OuterLoopCount);
+//    debug.simPrintf(beginFwdProp, "[%4d] [%2d] Begin Simulation Sample[%d]\n", Tick, ID, OuterLoopCount);
 //    debug.simPrintf("[%4d] Uniform Rand = (%f, %f, %f), Gaussian Rand = %f\n", Tick, URand0, URand1, URand2, GaussianRandomNumber);
 //    debug.simPrintf(beginFwdProp, "[%4d] theta = (%f, %f, %f)\n", Tick, theta_1, theta_2, theta_3);
 //    for(int i=0; i<15; ++i) debug.simPrintf(beginFwdProp, "[%4d] Input Observ[%d] = %f\n", Tick, i, Observ[i]);
@@ -336,7 +336,7 @@ class LightweightSimulator extends KernelLib {
 //    debug.simPrintf(isFwdValid, "[%4d] [%2d] Mean = (%f, %f, %f), Std = (%f, %f, %f) => Action = (%f, %f, %f) => |Reward_Dist| = %f, |Reward_Ac| = %f, Reward = %f\n", Tick, ID, Mean[0], Mean[1], Mean[2], Std[0], Std[1], Std[2], Action[0], Action[1], Action[2], Reward_Distance, Reward_Action, Reward);
 //    debug.simPrintf(isFwdValid, "[%4d] Output Observ[3:11] = (%f, %f, %f, %f, %f, %f, %f, %f, %f)\n", Tick, Observ[3], Observ[4], Observ[5], Observ[6], Observ[7], Observ[8], Observ[9], Observ[10], Observ[11]);
 //    debug.simPrintf(EnObservUpdate, "[%4d] Observation State Updated\n", Tick);
-
+*/
     }
 
 }
