@@ -88,7 +88,6 @@ class LightweightKernel extends Kernel {
 
     DFEVector<DFEVector<DFEVar>> ObservGridVec = ObservGridVecType.newInstance(this);
     DFEVector<DFEVector<DFEVar>>   MeanGridVec = ActionGridVecType.newInstance(this);
-    DFEVector<DFEVector<DFEVar>>    StdGridVec = ActionGridVecType.newInstance(this);
     DFEVector<DFEVector<DFEVar>> ActionGridVec = ActionGridVecType.newInstance(this);
     DFEVector<DFEVar> RewardVec = RewardVecType.newInstance(this);
 
@@ -99,11 +98,9 @@ class LightweightKernel extends Kernel {
         LW[i] = new LightweightSimulator(this, i, WeightInitData, BiasStdInitData, beginInit, beginSimulation_i);
         DFEVector<DFEVar> Observ = LW[i].getObserv();
         DFEVector<DFEVar>   Mean = LW[i].getMean();
-        DFEVector<DFEVar>    Std = LW[i].getStd();
         DFEVector<DFEVar> Action = LW[i].getAction();
         for (int dim=0; dim<Def.ObservSpaceDim; ++dim) ObservGridVec[dim][i] <== Observ[dim];
         for (int dim=0; dim<Def.ActionSpaceDim; ++dim)   MeanGridVec[dim][i] <==   Mean[dim];
-        for (int dim=0; dim<Def.ActionSpaceDim; ++dim)    StdGridVec[dim][i] <==    Std[dim];
         for (int dim=0; dim<Def.ActionSpaceDim; ++dim) ActionGridVec[dim][i] <== Action[dim];
         RewardVec[i] <== LW[i].getReward();
     }
@@ -134,15 +131,12 @@ class LightweightKernel extends Kernel {
 
     // Mean Std Action Output
     DFEVector<DFEVar>   FixMeanVec = FixAcVecType.newInstance(this);
-    DFEVector<DFEVar>    FixStdVec = FixAcVecType.newInstance(this);
     DFEVector<DFEVar> FixActionVec = FixAcVecType.newInstance(this);
     for (int dim=0; dim<Def.ActionSpaceDim; ++dim) {
           FixMeanVec[dim] <== control.oneHotMux(ActionRewardSelect,   MeanGridVec[dim].getElementsAsList());
-           FixStdVec[dim] <== control.oneHotMux(ActionRewardSelect,    StdGridVec[dim].getElementsAsList());
         FixActionVec[dim] <== control.oneHotMux(ActionRewardSelect, ActionGridVec[dim].getElementsAsList());
     }
     DFEVector<DFEVar>   OutMeanVec = FixMeanVec.cast(OutAcVecType);
-    DFEVector<DFEVar>    OutStdVec = FixStdVec.cast(OutAcVecType);
     DFEVector<DFEVar> OutActionVec = FixActionVec.cast(OutAcVecType);
 
     // Reward Output

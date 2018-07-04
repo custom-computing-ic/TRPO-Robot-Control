@@ -368,18 +368,18 @@ class EvenFwdLayer extends KernelLib{
 
     // tanh() activation function
     // Remarks: Consider Function Approximation if hardware resource is very limited
-    public DFEVar tanh(DFEVar input) {
-        DFEVar x = input.cast(Def.AcInType);
+    public DFEVar tanh(DFEVar Input) {
+        DFEVar x = Input.cast(Def.AcInType);
         // Exp
-        optimization.pushPipeliningFactor(Def.PipelineFactorDefault);
-        DFEVar Exp2xPlus1 = KernelMath.exp(2*x, Def.AcExpType) + 1.0;
+        optimization.pushPipeliningFactor(Def.PipelineFactorExp);
+        DFEVar Exp2xPlus1 = KernelMath.exp(x*2, Def.AcExpType) + 1;
+        optimization.popPipeliningFactor();
         // Div
         optimization.pushPipeliningFactor(Def.PipelineFactorDiv);
-        DFEVar DivResult = 2.0 / Exp2xPlus1;
+        DFEVar DivResult = 2 / Exp2xPlus1;
         optimization.popPipeliningFactor();
         // Sub
-        DFEVar Result = 1.0 - DivResult.cast(Def.yType);
-        optimization.popPipeliningFactor();
+        DFEVar Result = (x>2.77) ? 0.995 : 1 - DivResult.cast(Def.yType);
         return Result;
     }
 

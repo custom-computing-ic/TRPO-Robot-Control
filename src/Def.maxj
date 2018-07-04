@@ -65,7 +65,8 @@ class Def {
         
     public static final int KernelFrequencyMAX4 = 200;
     public static final int MaxFanout = 16;
-    public static final double PipelineFactorDiv     = 1.0;
+    public static final double PipelineFactorExp     = 0.8;
+    public static final double PipelineFactorDiv     = 0.8;
     public static final double PipelineFactorMult    = 1.0;
     public static final double PipelineFactorDefault = 1.0;
 
@@ -96,9 +97,9 @@ class Def {
     // For Accumulator
     public static final DFEType AccType = KernelLib.dfeFix(20, FracBits, SignMode.TWOSCOMPLEMENT);
     
-    // For tanh() Activation Function - current AcExpType supports inputs within [-3, 3]
-    public static final DFEType AcInType  = KernelLib.dfeFix(5, FracBits, SignMode.TWOSCOMPLEMENT);
-    public static final DFEType AcExpType = KernelLib.dfeFix(12, FracBits, SignMode.UNSIGNED);
+    // For tanh() Activation Function - current AcExpType supports inputs within (-8, 8)
+    public static final DFEType AcInType  = KernelLib.dfeFix(4, FracBits, SignMode.TWOSCOMPLEMENT);
+    public static final DFEType AcExpType = KernelLib.dfeFix(8, FracBits, SignMode.UNSIGNED);
 
     // For Reward Calculation - need a few more fractional bits to avoid cancellation
     public static final DFEType RewardType = KernelLib.dfeFix(6, FracBits, SignMode.TWOSCOMPLEMENT);
@@ -118,6 +119,5 @@ class Def {
         }
         return encodedData;
     }
-
 
 }
