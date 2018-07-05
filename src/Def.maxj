@@ -70,7 +70,7 @@ class Def {
     public static final double PipelineFactorMult    = 1.0;
     public static final double PipelineFactorDefault = 1.0;
 
-    public static final int ForwardKinematicsCalcLatency = 260;
+    public static final int ForwardKinematicsCalcLatency = 200;
 
 
     ///////////////////////// Data Types /////////////////////////

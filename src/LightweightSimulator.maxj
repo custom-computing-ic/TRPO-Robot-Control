@@ -73,6 +73,9 @@ class LightweightSimulator extends KernelLib {
 
     /////////////////////// Control - Overall Progress ///////////////////////
 
+    // Tick Count - for handling negative stream offset
+    DFEVar Tick = control.count.simpleCounter(32);
+
     // Total Cycles of Lightweight Simulation
     AddrGenerator LightweightSimulationCounter = new AddrGenerator(this, 1, TotalSimulationCycles, beginSimulation);
     DFEVar isSimulating = LightweightSimulationCounter.isValid();
@@ -282,7 +285,7 @@ class LightweightSimulator extends KernelLib {
     Grip_z_IN <== EnObservInit ? Def.Grip_z : stream.offset(Grip_z_new, -ForwardKinematicsOffset);
 
     // EnUpdate
-    EnObservUpdate <== stream.offset(isFwdValid, -ForwardKinematicsOffset);
+    EnObservUpdate <== (Tick < Def.ForwardKinematicsCalcLatency) ? 0 : stream.offset(isFwdValid, -ForwardKinematicsOffset);
 
 
     /////////////////////// Output ///////////////////////
@@ -326,7 +329,6 @@ class LightweightSimulator extends KernelLib {
     /////////////////////// Debug ///////////////////////
 /*
     // Debug
-    DFEVar Tick = control.count.simpleCounter(32);
     debug.simPrintf(beginEpisode, "[%4d] [%2d] ----- Begin Episode ----- \n", Tick, ID);
 //    debug.simPrintf(beginFwdProp, "[%4d] [%2d] Begin Simulation Sample[%d]\n", Tick, ID, OuterLoopCount);
 //    debug.simPrintf("[%4d] Uniform Rand = (%f, %f, %f), Gaussian Rand = %f\n", Tick, URand0, URand1, URand2, GaussianRandomNumber);

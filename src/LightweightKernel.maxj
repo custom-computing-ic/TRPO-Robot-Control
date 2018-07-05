@@ -94,7 +94,7 @@ class LightweightKernel extends Kernel {
     // Lightweight Simulators
     LightweightSimulator [] LW = new LightweightSimulator[Def.NumLightweightSimulators];
     for (int i=0; i<Def.NumLightweightSimulators; ++i) {
-        DFEVar beginSimulation_i = (Tick === WeightInitCycles + IterNumber + 16*i);
+        DFEVar beginSimulation_i = (Tick === Def.ForwardKinematicsCalcLatency + WeightInitCycles + IterNumber + 16*i);
         LW[i] = new LightweightSimulator(this, i, WeightInitData, BiasStdInitData, beginInit, beginSimulation_i);
         DFEVector<DFEVar> Observ = LW[i].getObserv();
         DFEVector<DFEVar>   Mean = LW[i].getMean();
