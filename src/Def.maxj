@@ -23,10 +23,10 @@ class Def {
     public static final int ActionSpaceDim = 3;
 
     // Lightweight Simulator
-    public static final int NumEpisodes = 20;
+    public static final int NumEpisodes = 21;
     public static final int EpisodeLen  = 150;
     public static final int NumSamples  = NumEpisodes * EpisodeLen;
-    public static final int NumLightweightSimulators = 5;
+    public static final int NumLightweightSimulators = 7;
     public static final int NumEpisodesPerSimulator = NumEpisodes / NumLightweightSimulators;
     public static final double TimeStepLen = 0.02;
 
@@ -71,7 +71,7 @@ class Def {
     public static final double PipelineFactorDefault = 1.0;
 
     public static final int ForwardKinematicsCalcLatency = 200;
-
+    public static final int EvenLayerCompExtraLatency = 2;
 
     ///////////////////////// Data Types /////////////////////////
 

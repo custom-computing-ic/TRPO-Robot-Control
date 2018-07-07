@@ -60,7 +60,7 @@ class LightweightSimulator extends KernelLib {
     for (int i=0; i<NumLayers; ++i) BlockDim[i] = LayerSize[i] / NumBlocks[i];
 
     // Number of Cycles for Each Round of Simulation (Forward Propagation + Def.ForwardKinematicsCalcLatency)
-    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]) + Def.EvenLayerCompExtraLatency;
     int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
     int SimulationCyclesPerSample = FwdPropCyclesPerSample + Def.ForwardKinematicsCalcLatency;
 

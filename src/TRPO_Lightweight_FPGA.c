@@ -54,13 +54,13 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     size_t pos;
 
     // Number of Episodes per Batch (NumEpisodes in Def.maxj)
-    const int NumEpBatch = 20;
+    const int NumEpBatch = 21;
     
     // Length of Each Episode - timestep_limit (EpisodeLen in Def.maxj)
     const int EpLen = 150;
 
     // Number of Lightweight Simulators
-    const int NumLightweightSimulators = 5;
+    const int NumLightweightSimulators = 7;
 
     // Number of Samples
     size_t NumSamples = NumEpBatch * EpLen;

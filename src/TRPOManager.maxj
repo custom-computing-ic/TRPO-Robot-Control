@@ -128,7 +128,7 @@ public class TRPOManager extends CustomManager{
         ///////////////////////// Ticks /////////////////////////
 
         // Number of Ticks
-        int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+        int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]) + Def.EvenLayerCompExtraLatency;
         int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3] + Def.ForwardKinematicsCalcLatency;
         int FwdPropCycles = FwdPropCyclesPerSample * Def.NumSamples / Def.NumLightweightSimulators;
         int NumTicks = WeightInitVecLength + FwdPropCycles + 1000;
