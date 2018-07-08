@@ -79,7 +79,7 @@ class CPP extends KernelLib{
         System.out.println("[Warning] Better efficiency is achieved when BlockDim[0] >= BlockDim[2].");
         System.out.println("[Warning] Consider changing NumBlocks[] settings to make BlockDim[0] >= BlockDim[2].");
     }
-    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]);
+    int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]) + Def.EvenLayerCompExtraLatency;
     int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
     int BwdPropCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
     int PropCyclesPerSample    = Math.max(FwdPropCyclesPerSample, BwdPropCyclesPerSample);
@@ -269,7 +269,7 @@ class CPP extends KernelLib{
     }
 
     // Inputs for Back Propagation
-    int Bwd_Fst_CycleTime = Math.max(BlockDim[0], BlockDim[2]);
+    int Bwd_Fst_CycleTime = Math.max(BlockDim[0], BlockDim[2]) + Def.EvenLayerCompExtraLatency;
     DFEVector<DFEVar> Bwd_y_0_Fst = Buffer0.getBwdData();
     DFEVector<DFEVar> Bwd_y_1     = Y1_Type.newInstance(this);
     DFEVector<DFEVar> Bwd_RG_1    = RG1_Type.newInstance(this);
@@ -309,7 +309,7 @@ class CPP extends KernelLib{
 
     // Second Layer: Layer[1] => Layer[2]
     // Remarks: Fwd_Snd_CycleTime = max(BlockDim[0], BlockDim[2], CompLatency) 
-    int Fwd_Snd_CycleTime = Math.max(BlockDim[0], BlockDim[2]);
+    int Fwd_Snd_CycleTime = Math.max(BlockDim[0], BlockDim[2]) + Def.EvenLayerCompExtraLatency;
     DFEVar beginFwdPropSnd = FstLayerFirstResultReady;
     DFEVector<DFEVar> y_1_in = Y1_Type.newInstance(this);
     for (int i=0; i<NumBlocks[1]; ++i) {
