@@ -421,7 +421,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     // Remarks: Here we assume 4 layers
     size_t MaxBlkDim0Dim2     = ( (BlockDim[0]>BlockDim[2]) ? BlockDim[0] : BlockDim[2] ) + EvenLayerCompExtraLatency;
     size_t FwdCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
-    size_t BwdCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    size_t BwdCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + (BlockDim[2]+EvenLayerCompExtraLatency)*BlockDim[3];
     size_t CyclesPerSample    = (FwdCyclesPerSample>BwdCyclesPerSample) ? FwdCyclesPerSample : BwdCyclesPerSample;
     size_t PropCyclesTotal    = CyclesPerSample * (NumSamples + 1);
 

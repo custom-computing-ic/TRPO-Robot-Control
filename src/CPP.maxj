@@ -81,7 +81,7 @@ class CPP extends KernelLib{
     }
     int MaxBlkDim0Dim2 = Math.max(BlockDim[0], BlockDim[2]) + Def.EvenLayerCompExtraLatency;
     int FwdPropCyclesPerSample = BlockDim[0] + (BlockDim[1]-1)*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
-    int BwdPropCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + BlockDim[2]*BlockDim[3];
+    int BwdPropCyclesPerSample = BlockDim[1]*MaxBlkDim0Dim2 + (BlockDim[2]+Def.EvenLayerCompExtraLatency)*BlockDim[3];
     int PropCyclesPerSample    = Math.max(FwdPropCyclesPerSample, BwdPropCyclesPerSample);
 
 
@@ -382,7 +382,7 @@ class CPP extends KernelLib{
     }
 
     // Inputs for Back Propagation
-    int Bwd_Trd_CycleTime = BlockDim[2];
+    int Bwd_Trd_CycleTime = BlockDim[2] + Def.EvenLayerCompExtraLatency;
     DFEVector<DFEVar> Bwd_y_2_Trd = FwdBuf2.getBwdY();
     DFEVector<DFEVar> Bwd_y_3     = Y3_Type.newInstance(this);
     DFEVector<DFEVar> Bwd_RG_3    = RG3_Type.newInstance(this);
