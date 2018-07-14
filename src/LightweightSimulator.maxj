@@ -220,15 +220,18 @@ class LightweightSimulator extends KernelLib {
     }
 
     // Calculate Action
+    DFEVector<DFEVar> LimitAction = ActionVecType.newInstance(this);
     Action = ActionVecType.newInstance(this);
     for (int i=0; i<Def.ActionSpaceDim; ++i) {
-        Action[i] <== Reductions.streamHold(GRand[i] * Std[i] + Mean[i], isFwdValid);
+        // Apply Action Limit
+             Action[i] <== Reductions.streamHold(GRand[i] * Std[i] + Mean[i], isFwdValid);
+        LimitAction[i] <== (Action[i] < -1) ? -1 : (  (Action[i] > 1) ? 1 : Action[i]  );
     }
 
     // Update theta
-    DFEVar theta_1_new = theta_1 + Action[0] * Def.TimeStepLen;
-    DFEVar theta_2_new = theta_2 + Action[1] * Def.TimeStepLen;
-    DFEVar theta_3_new = theta_3 + Action[2] * Def.TimeStepLen;
+    DFEVar theta_1_new = theta_1 + LimitAction[0] * Def.TimeStepLen;
+    DFEVar theta_2_new = theta_2 + LimitAction[1] * Def.TimeStepLen;
+    DFEVar theta_3_new = theta_3 + LimitAction[2] * Def.TimeStepLen;
 
     // Internal Trigonometric Calculation
     DFEVar s1 = KernelMath.sin(theta_1_new);
@@ -307,7 +310,7 @@ class LightweightSimulator extends KernelLib {
     Observ[12] <== Observ_30;
     Observ[13] <== Observ_31;
     Observ[14] <== Observ_32;
-    
+
     // Calculating Reward
     DFEVar Reward_x = KernelMath.abs(Grip_x_new - Observ_30).cast(Def.RewardType) * 10;
     DFEVar Reward_y = KernelMath.abs(Grip_y_new - Observ_31).cast(Def.RewardType) * 10;

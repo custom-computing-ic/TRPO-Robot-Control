@@ -112,6 +112,11 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     double * PGLogStd = (double *) calloc(ActionSpaceDim, sizeof(double));
 
 
+    //////////////////// Memory Allocation - Episodic Reward ////////////////////
+
+    double * episodicRew = (double *) calloc(NumIter, sizeof(double));
+
+
     //////////////////// Memory Allocation - Simulation Data ////////////////////
 
     // Allocate Memory for Observation and Probability Mean
@@ -134,6 +139,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     double * Mean_FPGA   = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
     double * Action_FPGA = (double *) calloc(NumSamples*ActionSpaceDim, sizeof(double));
     double * Reward_FPGA = (double *) calloc(NumSamples, sizeof(double));
+
 
     //////////////////// Memory Allocation - Ordinary Forward and Backward Propagation ////////////////////
 
@@ -471,9 +477,12 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     //////////////////// Main Loop ////////////////////
 
     // Calculate Time
-    struct timeval tv1, tv2, tv3, tv4;
+    struct timeval tv1, tv2, tv3, tv4, tv5, tv6, tv7, tv8;
     double runtimeS = 0;
     double fpgaTime = 0;
+    double simuTime = 0;
+    double trpoTime = 0;
+    double vfTime = 0;
 
 
     // Run Training for NumIter Iterations
@@ -548,6 +557,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
 
         gettimeofday(&tv4, NULL);
         fpgaTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
+        simuTime += ((tv4.tv_sec-tv3.tv_sec) * (double)1E6 + (tv4.tv_usec-tv3.tv_usec)) / (double)1E6;
 
         // Re-Ordering FPGA Output Data
         size_t WrRowAddr = 0;
@@ -595,6 +605,7 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
         EpRewStd = sqrt(EpRewStd / (double) (NumEpBatch));
 
         printf("[INFO] Iteration %d, Episode Rewards Mean = %f, Std = %f\n", iter, EpRewMean, EpRewStd);
+        episodicRew[iter] = EpRewMean;
 
         
         ///////// Calculate Advantage /////////
@@ -693,6 +704,8 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
         
         ///////// Baseline Update /////////  TODO: Can be executed concurrently with TRPO Update
 
+        gettimeofday(&tv5, NULL);
+
         // Write Weight and Bias of the Baseline to LBFGS_x
         pos = 0;
         for (size_t i=0; i<NumLayers-1; ++i) {
@@ -730,9 +743,13 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             }
         }
 
+        gettimeofday(&tv6, NULL);
+        vfTime += ((tv6.tv_sec-tv5.tv_sec) * (double)1E6 + (tv6.tv_usec-tv5.tv_usec)) / (double)1E6;
   
         //////////////////// TRPO Update ////////////////////
   
+        gettimeofday(&tv7, NULL);
+
         ///////// Computing Policy Gradient /////////
 
         // reset Policy Gradient to 0
@@ -1607,7 +1624,10 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
             }
     
         }   // End of Line Search
-    
+
+        gettimeofday(&tv8, NULL);
+        trpoTime += ((tv8.tv_sec-tv7.tv_sec) * (double)1E6 + (tv8.tv_usec-tv7.tv_usec)) / (double)1E6;
+
         // Update Model from theta
         pos = 0;
         for (size_t i=0; i<NumLayers-1; ++i) {
@@ -1679,7 +1699,20 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
         
     } // Training Finished
 
-    fprintf(stderr, "[INFO] Total Time for training is %f seconds, among which FPGA Time is %f seconds.\n", runtimeS, fpgaTime);
+    fprintf(stderr, "[INFO] Total Time for training is %fs: FPGA Time = %fs, simuTime = %fs, trpoTime = %fs, VF Update = %fs.\n", runtimeS, fpgaTime, simuTime, trpoTime, vfTime);
+
+
+    //////////////////// Report Episodic Reward ////////////////////
+
+    FILE *RewardFilePointer = fopen("EpRewMean.txt", "w");
+    if (RewardFilePointer==NULL) {
+        fprintf(stderr, "[ERROR] Cannot open Reward File \"EpRewMean.txt\"\n");
+        return -1;
+    }
+    for (size_t k=0; k<NumIter; ++k) {
+        fprintf(RewardFilePointer, "%.14f\n", episodicRew[k]);
+    }
+    fclose(RewardFilePointer);
 
 
     //////////////////// Clean Up ////////////////////
@@ -1725,7 +1758,8 @@ double TRPO_Lightweight_FPGA (TRPOparam param, const int NumIter, const size_t N
     free(ob); free(ac); free(obMean); free(obVar);
 
     // Simulation Data and Advantage Calculation
-    free(Observ); free(Mean); free(Std); free(Action); free(Reward); free(Return); free(Baseline); free(Advantage);
+    free(Observ); free(Mean); free(Std); free(Action); free(Reward);
+    free(Return); free(Baseline); free(Advantage); free(episodicRew);
     
     // FPGA
     max_unload(engine); TRPO_free();

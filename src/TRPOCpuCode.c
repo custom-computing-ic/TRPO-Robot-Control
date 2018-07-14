@@ -221,7 +221,7 @@ void Test_FVP_FPGA() {
     return;
 
 }
-/*
+
 void Test_CG_FPGA(size_t NumThreads)
 {
 
@@ -245,7 +245,7 @@ void Test_CG_FPGA(size_t NumThreads)
     Param.LayerSize         = LayerSize;
     Param.PaddedLayerSize   = PaddedLayerSize;
     Param.NumBlocks         = NumBlocks;
-    Param.NumSamples        = 2400;
+    Param.NumSamples        = 3150;
     Param.CG_Damping        = 0.1;
 
     // Open Simulation Data File that contains test data
@@ -287,9 +287,9 @@ void Test_CG_FPGA(size_t NumThreads)
     	    percentage_err += cur_err;
     	    max_percentage_err = (max_percentage_err > cur_err) ? max_percentage_err : cur_err;
     	}
-//    	if (cur_err>1) printf("CG_FPGA[%zu]=%e, CG_CPU[%zu]=%e. %.4f%% Difference\n", i, FPGA_output[i], i, CPU_output[i], cur_err);
+        if (cur_err>1) printf("CG_FPGA[%zu]=%e, CG_CPU[%zu]=%e. %.4f%% Difference\n", i, FPGA_output[i], i, CPU_output[i], cur_err);
     }
-    
+
     // Print Results
     FILE *ResultFilePointer = fopen("result.txt", "w");
     if(ResultFilePointer == NULL) fprintf(stderr, "[ERROR] Open Output File Failed.\n");
@@ -297,7 +297,7 @@ void Test_CG_FPGA(size_t NumThreads)
         fprintf(ResultFilePointer, "%.12f %.12f\n", CPU_output[i], FPGA_output[i]);
     }
     fclose(ResultFilePointer);    
-    
+
     percentage_err = percentage_err / (double)NumParams;
     printf("\n-------------------------- CG Result Check --------------------------\n");
     printf("[INFO] FPGA Time = %f seconds, CPU Time = %f seconds\n", runtimeFPGA, runtimeCPU);
@@ -306,11 +306,11 @@ void Test_CG_FPGA(size_t NumThreads)
 
     // Clean Up    
     free(input); free(CPU_output); free(FPGA_output);
-    
+
     return;
 }
 
-
+/*
 void Test_TRPO_Update(size_t NumThreads)
 {
 	
@@ -482,8 +482,8 @@ int main() {
     //////////////////// FPGA ////////////////////
 
 //    Test_FVP_FPGA();
-//    Test_CG_FPGA(6);
-    Test_TRPO_Lightweight_FPGA(2, 6);
+//    Test_CG_FPGA(1);
+    Test_TRPO_Lightweight_FPGA(4, 1);
 
     //////////////////// Simulation Based Training ////////////////////
 
